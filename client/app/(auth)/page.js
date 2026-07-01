@@ -1,4 +1,4 @@
-export default function Home() {
+export default function AuthPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-6 py-10 font-sans dark:bg-black">
       <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
