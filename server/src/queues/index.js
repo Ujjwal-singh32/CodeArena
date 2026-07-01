@@ -1,5 +1,5 @@
 import { Queue, Worker } from "bullmq";
-import { getRedis } from "../config/redis.js";
+import Redis from "ioredis";
 import { env } from "../config/env.js";
 
 const QUEUE_NAMES = {
@@ -8,17 +8,26 @@ const QUEUE_NAMES = {
   EMAIL: "email",
 };
 
-function getConnection() {
-  const redis = getRedis();
-  if (!redis) return null;
-  return { host: new URL(env.redisUrl).hostname, port: parseInt(new URL(env.redisUrl).port || "6379", 10) };
+let bullConnection = null;
+
+function getBullConnection() {
+  if (bullConnection) return bullConnection;
+  try {
+    bullConnection = new Redis(env.redisUrl, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    });
+    return bullConnection;
+  } catch {
+    return null;
+  }
 }
 
 const queues = {};
 
 export function getQueue(name) {
   if (queues[name]) return queues[name];
-  const connection = getConnection();
+  const connection = getBullConnection();
   if (!connection) return null;
   queues[name] = new Queue(name, { connection });
   return queues[name];
@@ -61,7 +70,7 @@ async function processInline(type, data) {
 }
 
 export function createWorker(name, processor) {
-  const connection = getConnection();
+  const connection = getBullConnection();
   if (!connection) {
     registerInlineHandler(name, processor);
     return null;

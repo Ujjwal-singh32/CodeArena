@@ -8,8 +8,7 @@ import Button from "@/components/ui/Button";
 import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
-import { languages } from "@/lib/mockData";
-import { collabApi } from "@/services/api";
+import { LANGUAGES, collabApi } from "@/services/api";
 
 export default function CollabPage() {
   const [mode, setMode] = useState(null);
@@ -99,7 +98,7 @@ export default function CollabPage() {
             />
             <Select
               label="Default Language"
-              options={languages}
+              options={LANGUAGES}
               value={roomLang}
               onChange={(e) => setRoomLang(e.target.value)}
             />

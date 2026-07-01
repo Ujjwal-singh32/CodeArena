@@ -9,6 +9,7 @@ export function getRedis() {
       redis = new Redis(env.redisUrl, {
         maxRetriesPerRequest: null,
         lazyConnect: true,
+        enableReadyCheck: true,
       });
     } catch {
       redis = null;
@@ -21,7 +22,9 @@ export async function connectRedis() {
   const client = getRedis();
   if (!client) return false;
   try {
-    if (client.status !== "ready") await client.connect();
+    if (client.status === "wait") await client.connect();
+    await client.ping();
+    console.log("Redis connected (ioredis)");
     return true;
   } catch (err) {
     console.warn("Redis unavailable:", err.message);

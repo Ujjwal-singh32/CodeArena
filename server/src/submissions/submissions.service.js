@@ -1,7 +1,7 @@
 import prisma from "../config/db.js";
 import { AppError } from "../utils/AppError.js";
 import { clientToPrismaLang } from "../problems/problems.service.js";
-import { judgeSubmission, executeCode } from "../execution/sandbox.js";
+import { judgeSubmission } from "../execution/sandbox.js";
 import { addExecutionJob, addAiReviewJob } from "../queues/index.js";
 import { publishEvent } from "../config/kafka.js";
 
@@ -11,20 +11,30 @@ export async function runSampleTests({ userId, problemId, code, language }) {
     include: { testCases: { where: { isSample: true } } },
   });
   if (!problem) throw new AppError("Problem not found", 404);
+  if (problem.testCases.length === 0) {
+    throw new AppError("No sample test cases configured for this problem", 400);
+  }
 
-  const result = await executeCode({
+  const result = await judgeSubmission({
     code,
     language,
-    input: problem.testCases[0]?.input || "",
+    testCases: problem.testCases,
     timeLimitSec: problem.timeLimit,
     memoryLimitMb: problem.memoryLimit,
   });
 
+  const output =
+    result.status === "WRONG_ANSWER"
+      ? `Wrong Answer\nYour output:\n${result.stdout || "(empty)"}\nExpected:\n${result.expectedOutput || ""}`
+      : result.stdout || result.stderr || result.compileOutput || "";
+
   return {
-    output: result.stdout || result.stderr || "",
+    output,
     status: result.status,
     runtime: result.runtime,
     memory: result.memory,
+    passedTestCases: result.passedTestCases,
+    totalTestCases: result.totalTestCases,
   };
 }
 
@@ -60,7 +70,10 @@ export async function createSubmission({ userId, problemId, code, language, matc
   });
 
   if (jobResult.inline) {
-    return { submission, verdict: jobResult.result };
+    return {
+      submission: jobResult.result?.submission || submission,
+      verdict: jobResult.result?.verdict || jobResult.result,
+    };
   }
 
   return { submission, jobId: jobResult.jobId };
@@ -124,4 +137,22 @@ export async function getSubmission(id, userId) {
   if (!submission) throw new AppError("Submission not found", 404);
   if (submission.userId !== userId) throw new AppError("Forbidden", 403);
   return submission;
+}
+
+export async function listUserSubmissions(userId, limit = 20) {
+  const submissions = await prisma.submission.findMany({
+    where: { userId },
+    include: { problem: { select: { title: true, slug: true } } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return submissions.map((s) => ({
+    id: s.id,
+    problem: s.problem.title,
+    slug: s.problem.slug,
+    status: s.status,
+    language: s.language,
+    runtime: s.runtime ? `${s.runtime} ms` : "—",
+    date: s.createdAt,
+  }));
 }

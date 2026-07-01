@@ -7,19 +7,74 @@ const twoSumStatement = `Given an array of integers **nums** and an integer **ta
 
 You may assume that each input would have exactly one solution, and you may not use the same element twice.`;
 
+const jsBoilerplate = `const fs = require('fs');
+const lines = fs.readFileSync('input.txt', 'utf8').trim().split('\\n');
+const nums = lines[0].split(' ').map(Number);
+const target = parseInt(lines[1], 10);
+
+const map = new Map();
+for (let i = 0; i < nums.length; i++) {
+  const need = target - nums[i];
+  if (map.has(need)) {
+    console.log(map.get(need) + ' ' + i);
+    process.exit(0);
+  }
+  map.set(nums[i], i);
+}
+`;
+
+const pyBoilerplate = `lines = open('input.txt').read().strip().split('\\n')
+nums = list(map(int, lines[0].split()))
+target = int(lines[1])
+
+seen = {}
+for i, n in enumerate(nums):
+    if target - n in seen:
+        print(seen[target - n], i)
+        break
+    seen[n] = i
+`;
+
+const cppBoilerplate = `#include <bits/stdc++.h>
+using namespace std;
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    freopen("input.txt", "r", stdin);
+    string line;
+    getline(cin, line);
+    stringstream ss(line);
+    vector<int> nums;
+    int x;
+    while (ss >> x) nums.push_back(x);
+    int target;
+    cin >> target;
+    unordered_map<int,int> mp;
+    for (int i = 0; i < (int)nums.size(); i++) {
+        if (mp.count(target - nums[i])) {
+            cout << mp[target - nums[i]] << " " << i << "\\n";
+            return 0;
+        }
+        mp[nums[i]] = i;
+    }
+    return 0;
+}
+`;
+
 async function main() {
   const passwordHash = await bcrypt.hash("password123", 12);
 
   const user = await prisma.user.upsert({
     where: { email: "demo@codearena.dev" },
-    update: {},
+    update: { emailVerified: true },
     create: {
       username: "code_warrior",
       email: "demo@codearena.dev",
       passwordHash,
       emailVerified: true,
       rating: 1642,
-      solvedCount: 127,
+      solvedCount: 0,
       profile: { create: { bio: "Competitive programming enthusiast" } },
     },
   });
@@ -42,15 +97,18 @@ async function main() {
     create: { name: "Arrays" },
   });
 
-  const problem = await prisma.problem.upsert({
+  await prisma.problem.upsert({
     where: { slug: "two-sum" },
-    update: {},
+    update: {
+      inputFormat: "Line 1: space-separated integers (the array)\nLine 2: integer target\n\nPrograms read from input.txt in the judge working directory.",
+      outputFormat: "Two space-separated indices (0-indexed)",
+    },
     create: {
       title: "Two Sum",
       slug: "two-sum",
       statement: twoSumStatement,
-      inputFormat: "nums: integer array, target: integer",
-      outputFormat: "indices: integer array of length 2",
+      inputFormat: "Line 1: space-separated integers (the array)\nLine 2: integer target\n\nPrograms read from input.txt in the judge working directory.",
+      outputFormat: "Two space-separated indices (0-indexed)",
       constraints: "2 <= nums.length <= 10^4\n-10^9 <= nums[i] <= 10^9\n-10^9 <= target <= 10^9",
       difficulty: "EASY",
       isPublished: true,
@@ -59,14 +117,14 @@ async function main() {
       examples: {
         create: [
           {
-            input: "nums = [2,7,11,15], target = 9",
-            output: "[0,1]",
+            input: "2 7 11 15\n9",
+            output: "0 1",
             explanation: "nums[0] + nums[1] == 9",
             order: 1,
           },
           {
-            input: "nums = [3,2,4], target = 6",
-            output: "[1,2]",
+            input: "3 2 4\n6",
+            output: "1 2",
             order: 2,
           },
         ],
@@ -80,14 +138,9 @@ async function main() {
       },
       boilerplates: {
         create: [
-          {
-            language: "JAVASCRIPT",
-            starterCode: `/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number[]}\n */\nvar twoSum = function(nums, target) {\n    \n};`,
-          },
-          {
-            language: "PYTHON",
-            starterCode: `def twoSum(nums, target):\n    pass`,
-          },
+          { language: "JAVASCRIPT", starterCode: jsBoilerplate },
+          { language: "PYTHON", starterCode: pyBoilerplate },
+          { language: "CPP", starterCode: cppBoilerplate },
         ],
       },
       tags: {
@@ -99,7 +152,7 @@ async function main() {
     },
   });
 
-  console.log("Seed complete:", { user: user.username, problem: problem.slug });
+  console.log("Seed complete:", { user: user.username, problem: "two-sum" });
 }
 
 main()

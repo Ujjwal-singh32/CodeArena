@@ -15,8 +15,8 @@ import {
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import CollabEditor from "@/components/editor/CollabEditor";
-import { languages } from "@/lib/mockData";
-import { currentUser } from "@/lib/mockData";
+import { LANGUAGES } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 import { io } from "socket.io-client";
 import { getSocketUrl, aiApi } from "@/services/api";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,7 @@ const defaultMembers = [
 
 export default function CollabRoomPage() {
   const params = useParams();
+  const { user } = useAuth();
   const roomCode = params.code;
   const [language, setLanguage] = useState("javascript");
   const [members, setMembers] = useState(defaultMembers);
@@ -37,8 +38,8 @@ export default function CollabRoomPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const socketRef = useRef(null);
 
-  const userId = currentUser.username;
-  const username = currentUser.username;
+  const userId = user?.username || "guest";
+  const username = user?.username || "guest";
 
   useEffect(() => {
     const socket = io(getSocketUrl(), { transports: ["websocket", "polling"] });
@@ -178,7 +179,7 @@ export default function CollabRoomPage() {
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card flex-shrink-0">
             <Select
-              options={languages}
+              options={LANGUAGES}
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
               className="w-40"

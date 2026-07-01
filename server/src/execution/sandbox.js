@@ -5,13 +5,50 @@ import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { env } from "../config/env.js";
 
-const LANG_CONFIG = {
-  javascript: { file: "main.js", cmd: ["node", "main.js"], compile: false },
-  python: { file: "main.py", cmd: ["python3", "main.py"], compile: false },
-  cpp: { file: "main.cpp", cmd: ["./main"], compile: true, compileCmd: ["g++", "-O2", "-o", "main", "main.cpp"] },
-  c: { file: "main.c", cmd: ["./main"], compile: true, compileCmd: ["gcc", "-O2", "-o", "main", "main.c"] },
-  java: { file: "Main.java", cmd: ["java", "Main"], compile: true, compileCmd: ["javac", "Main.java"] },
-};
+const isWin = process.platform === "win32";
+const BIN = isWin ? "main.exe" : "./main";
+
+function getLangConfig(language) {
+  const configs = {
+    javascript: {
+      file: "main.js",
+      compile: false,
+      localRun: ["node", "main.js"],
+      dockerRun: "node main.js",
+    },
+    python: {
+      file: "main.py",
+      compile: false,
+      localRun: [isWin ? "python" : "python3", "main.py"],
+      dockerRun: "python3 main.py",
+    },
+    cpp: {
+      file: "main.cpp",
+      compile: true,
+      localCompile: ["g++", "-O2", "-std=c++17", "-o", isWin ? "main.exe" : "main", "main.cpp"],
+      localRun: isWin ? ["main.exe"] : ["./main"],
+      dockerCompile: "g++ -O2 -std=c++17 -o main main.cpp",
+      dockerRun: "./main",
+    },
+    c: {
+      file: "main.c",
+      compile: true,
+      localCompile: ["gcc", "-O2", "-o", isWin ? "main.exe" : "main", "main.c"],
+      localRun: isWin ? ["main.exe"] : ["./main"],
+      dockerCompile: "gcc -O2 -o main main.c",
+      dockerRun: "./main",
+    },
+    java: {
+      file: "Main.java",
+      compile: true,
+      localCompile: ["javac", "Main.java"],
+      localRun: ["java", "Main"],
+      dockerCompile: "javac Main.java",
+      dockerRun: "java Main",
+    },
+  };
+  return configs[language] || configs.javascript;
+}
 
 export async function executeCode({ code, language, input, timeLimitSec = 2, memoryLimitMb = 256 }) {
   if (env.execution.enabled) {
@@ -21,19 +58,20 @@ export async function executeCode({ code, language, input, timeLimitSec = 2, mem
 }
 
 async function executeLocally({ code, language, input, timeLimitSec }) {
-  const config = LANG_CONFIG[language] || LANG_CONFIG.javascript;
+  const config = getLangConfig(language);
   const workDir = join(tmpdir(), `codearena-${randomUUID()}`);
 
   try {
     await mkdir(workDir, { recursive: true });
     await writeFile(join(workDir, config.file), code);
+    await writeFile(join(workDir, "input.txt"), input || "");
 
     if (config.compile) {
-      const compileResult = await runProcess(config.compileCmd, workDir, "", timeLimitSec * 1000);
+      const compileResult = await runProcess(config.localCompile, workDir, "", timeLimitSec * 1000);
       if (compileResult.exitCode !== 0) {
         return {
           status: "COMPILATION_ERROR",
-          compileOutput: compileResult.stderr,
+          compileOutput: compileResult.stderr || compileResult.stdout,
           stdout: "",
           stderr: compileResult.stderr,
           runtime: 0,
@@ -43,7 +81,7 @@ async function executeLocally({ code, language, input, timeLimitSec }) {
     }
 
     const start = Date.now();
-    const result = await runProcess(config.cmd, workDir, input, timeLimitSec * 1000);
+    const result = await runProcess(config.localRun, workDir, "", timeLimitSec * 1000);
     const runtime = Date.now() - start;
 
     if (result.timedOut) {
@@ -66,35 +104,70 @@ async function executeLocally({ code, language, input, timeLimitSec }) {
 }
 
 async function executeInDocker({ code, language, input, timeLimitSec, memoryLimitMb }) {
-  const config = LANG_CONFIG[language] || LANG_CONFIG.javascript;
+  const config = getLangConfig(language);
   const workDir = join(tmpdir(), `codearena-docker-${randomUUID()}`);
 
   try {
     await mkdir(workDir, { recursive: true });
     await writeFile(join(workDir, config.file), code);
+    await writeFile(join(workDir, "input.txt"), input || "");
+
+    const shellCmd = config.compile
+      ? `${config.dockerCompile} 2>&1 && ${config.dockerRun} < input.txt`
+      : `${config.dockerRun} < input.txt`;
 
     const dockerArgs = [
-      "run", "--rm",
-      "--network", "none",
-      "--memory", `${memoryLimitMb}m`,
-      "--cpus", "0.5",
-      "-v", `${workDir}:/sandbox:ro`,
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--memory",
+      `${memoryLimitMb}m`,
+      "--cpus",
+      "0.5",
+      "-w",
+      "/sandbox",
+      "-v",
+      `${workDir}:/sandbox`,
       env.execution.sandboxImage,
-      ...config.cmd,
+      "sh",
+      "-c",
+      shellCmd,
     ];
 
     const start = Date.now();
-    const result = await runProcess(["docker", ...dockerArgs], workDir, input, timeLimitSec * 1000);
+    const result = await runProcess(["docker", ...dockerArgs], workDir, "", timeLimitSec * 1000);
     const runtime = Date.now() - start;
 
+    const combinedErr = result.stderr || "";
+    const combinedOut = result.stdout || "";
+
     if (result.timedOut) {
-      return { status: "TIME_LIMIT_EXCEEDED", stdout: result.stdout, stderr: result.stderr, runtime, memory: 0 };
-    }
-    if (result.exitCode !== 0) {
-      return { status: "RUNTIME_ERROR", stdout: result.stdout, stderr: result.stderr, runtime, memory: 0 };
+      return { status: "TIME_LIMIT_EXCEEDED", stdout: combinedOut, stderr: combinedErr, runtime, memory: 0 };
     }
 
-    return { status: "ACCEPTED", stdout: result.stdout.trim(), stderr: result.stderr, runtime, memory: 0 };
+    if (config.compile && (combinedErr.includes("error:") || combinedOut.includes("error:")) && result.exitCode !== 0) {
+      return {
+        status: "COMPILATION_ERROR",
+        compileOutput: combinedErr || combinedOut,
+        stdout: combinedOut,
+        stderr: combinedErr,
+        runtime,
+        memory: 0,
+      };
+    }
+
+    if (result.exitCode !== 0) {
+      return { status: "RUNTIME_ERROR", stdout: combinedOut, stderr: combinedErr, runtime, memory: 0 };
+    }
+
+    return {
+      status: "ACCEPTED",
+      stdout: combinedOut.trim(),
+      stderr: combinedErr,
+      runtime,
+      memory: 0,
+    };
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -102,7 +175,7 @@ async function executeInDocker({ code, language, input, timeLimitSec, memoryLimi
 
 function runProcess(cmd, cwd, stdin = "", timeoutMs = 5000) {
   return new Promise((resolve) => {
-    const proc = spawn(cmd[0], cmd.slice(1), { cwd, shell: process.platform === "win32" });
+    const proc = spawn(cmd[0], cmd.slice(1), { cwd, shell: false });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -112,11 +185,15 @@ function runProcess(cmd, cwd, stdin = "", timeoutMs = 5000) {
       proc.kill("SIGKILL");
     }, timeoutMs);
 
-    proc.stdout.on("data", (d) => { stdout += d.toString(); });
-    proc.stderr.on("data", (d) => { stderr += d.toString(); });
+    proc.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
 
-    if (stdin) proc.stdin.write(stdin);
-    proc.stdin.end();
+    if (stdin) proc.stdin?.write(stdin);
+    proc.stdin?.end();
 
     proc.on("close", (exitCode) => {
       clearTimeout(timer);
@@ -170,6 +247,7 @@ export async function judgeSubmission({ code, language, testCases, timeLimitSec,
         stderr: result.stderr,
         runtime: result.runtime,
         memory: result.memory,
+        expectedOutput: tc.expectedOutput,
       };
     }
 

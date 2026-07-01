@@ -97,6 +97,7 @@ export const problems = [
 ];
 
 export const problemDetail = {
+  id: 1,
   slug: "two-sum",
   title: "Two Sum",
   difficulty: "EASY",

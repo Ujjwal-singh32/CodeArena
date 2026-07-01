@@ -25,12 +25,15 @@ export const env = {
     from: process.env.EMAIL_FROM || "CodeArena <noreply@codearena.dev>",
   },
   ai: {
-    apiKey: process.env.AI_API_KEY,
-    apiUrl: process.env.AI_API_URL || "https://api.openai.com/v1/chat/completions",
-    model: process.env.AI_MODEL || "gpt-4o-mini",
+    apiKey: process.env.COHERE_API_KEY || process.env.AI_API_KEY,
+    apiUrl: process.env.COHERE_API_URL || process.env.AI_API_URL || "https://api.cohere.ai/v2/chat",
+    model: process.env.COHERE_MODEL || process.env.AI_MODEL || "command-r-plus",
   },
   execution: {
     enabled: process.env.EXECUTION_ENABLED === "true",
     sandboxImage: process.env.DOCKER_SANDBOX_IMAGE || "codearena-sandbox:latest",
+  },
+  admin: {
+    apiKey: process.env.ADMIN_API_KEY || "",
   },
 };

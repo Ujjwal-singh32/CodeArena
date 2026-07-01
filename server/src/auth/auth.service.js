@@ -43,6 +43,13 @@ export async function loginUser({ email, password }) {
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) throw new AppError("Invalid credentials", 401);
 
+  if (!user.emailVerified) {
+    throw new AppError(
+      "Please verify your email before logging in. Check your inbox for the verification link.",
+      403
+    );
+  }
+
   const accessToken = signAccessToken({ userId: user.id });
   const refreshToken = signRefreshToken({ userId: user.id });
 

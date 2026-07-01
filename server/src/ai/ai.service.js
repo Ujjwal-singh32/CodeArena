@@ -17,26 +17,41 @@ export async function aiAssist({ mode, code, language, problemTitle, question })
   if (!prompt) throw new Error("Invalid AI mode");
 
   if (env.ai.apiKey) {
-    const res = await fetch(env.ai.apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.ai.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: env.ai.model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 800,
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return { response: data.choices?.[0]?.message?.content || "No response." };
-    }
+    const responseText = await callCohere(prompt);
+    if (responseText) return { response: responseText };
   }
 
   return { response: getMockResponse(mode, problemTitle, question) };
+}
+
+async function callCohere(prompt) {
+  const res = await fetch(env.ai.apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.ai.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: env.ai.model,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 800,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("Cohere API error:", res.status, errText);
+    return null;
+  }
+
+  const data = await res.json();
+  return (
+    data.message?.content?.[0]?.text ||
+    data.text ||
+    data.generations?.[0]?.text ||
+    data.choices?.[0]?.message?.content ||
+    null
+  );
 }
 
 export async function selectDuelProblem(config) {

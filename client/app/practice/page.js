@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Search, Filter, SlidersHorizontal } from "lucide-react";
-import Input from "@/components/ui/Input";
+import { Search, Filter } from "lucide-react";
 import Select from "@/components/ui/Select";
 import Tabs from "@/components/ui/Tabs";
 import ProblemRow from "@/components/common/ProblemRow";
-import { problems } from "@/lib/mockData";
+import { problemsApi } from "@/services/api";
 
 const difficultyTabs = [
   { id: "all", label: "All" },
@@ -16,17 +15,21 @@ const difficultyTabs = [
   { id: "HARD", label: "Hard" },
 ];
 
-const statusTabs = [
-  { id: "all", label: "All" },
-  { id: "solved", label: "Solved" },
-  { id: "unsolved", label: "Unsolved" },
-];
-
 export default function PracticePage() {
+  const [problems, setProblems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("all");
-  const [status, setStatus] = useState("all");
   const [sortBy, setSortBy] = useState("default");
+
+  useEffect(() => {
+    problemsApi
+      .list({ limit: 100 })
+      .then((res) => setProblems(res.problems || []))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     let result = [...problems];
@@ -44,16 +47,11 @@ export default function PracticePage() {
       result = result.filter((p) => p.difficulty === difficulty);
     }
 
-    if (status === "solved") result = result.filter((p) => p.solved);
-    if (status === "unsolved") result = result.filter((p) => !p.solved);
-
     if (sortBy === "acceptance") result.sort((a, b) => b.acceptance - a.acceptance);
     if (sortBy === "title") result.sort((a, b) => a.title.localeCompare(b.title));
 
     return result;
-  }, [search, difficulty, status, sortBy]);
-
-  const solvedCount = problems.filter((p) => p.solved).length;
+  }, [problems, search, difficulty, sortBy]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -64,7 +62,7 @@ export default function PracticePage() {
       >
         <h1 className="text-3xl font-bold mb-2">Problems</h1>
         <p className="text-muted">
-          {solvedCount} of {problems.length} problems solved
+          {loading ? "Loading problems..." : `${filtered.length} problems available`}
         </p>
       </motion.div>
 
@@ -92,7 +90,6 @@ export default function PracticePage() {
 
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
         <Tabs tabs={difficultyTabs} activeTab={difficulty} onChange={setDifficulty} />
-        <Tabs tabs={statusTabs} activeTab={status} onChange={setStatus} />
       </div>
 
       <div className="glass rounded-xl overflow-hidden">
@@ -105,7 +102,11 @@ export default function PracticePage() {
         </div>
 
         <div className="divide-y divide-border/50">
-          {filtered.length > 0 ? (
+          {loading ? (
+            <div className="py-16 text-center text-muted">Loading...</div>
+          ) : error ? (
+            <div className="py-16 text-center text-danger">{error}</div>
+          ) : filtered.length > 0 ? (
             filtered.map((problem, i) => (
               <ProblemRow key={problem.id} problem={problem} index={i} />
             ))

@@ -438,9 +438,9 @@ Execution → Self-hosted custom Docker engine on a small VPS
 
 ### Phase 1 — Frontend UI: COMPLETE (UI-only, mock data)
 
-All pages and components built with JavaScript, Tailwind CSS v4,
-Framer Motion, Monaco Editor, and Lucide icons. Theme: black (#070707)
-background with neon green (#00ff88) accents — HackerRank-style.
+All pages and components are built with JavaScript, Tailwind CSS v4,
+Framer Motion, Monaco Editor, and Lucide icons. The visual system and
+core routes are in place, but most data remains mock-driven.
 
 #### Pages built (`client/app/`)
 
@@ -468,38 +468,104 @@ editor/   → CodeEditor.js (Monaco), OutputConsole.js, AIPanel.js
 common/   → StatCard.js, ProblemRow.js
 ```
 
-#### Utilities & mock data (`client/lib/`)
-
-- `utils.js` — cn(), formatDifficulty(), formatRating(), formatDate(), formatTime()
-- `mockData.js` — problems, problemDetail, currentUser, submissions, duels, contests, etc.
-
 #### Theme (`client/app/globals.css`)
 
 - Background: #070707, Cards: #111111, Borders: #242424, Primary: #00ff88
 - Glassmorphism, neon green glow, grid background, custom scrollbars
 
-#### Not yet connected (next phases)
+---
 
-- No backend API calls — all data is mock/static
-- No real auth, Socket.IO, Yjs, or judge pipeline
-- Monaco editor is UI-only (Run/Submit simulate with setTimeout)
-- AI panel uses mock responses
+### Phase 2 — Backend API: IMPLEMENTED (Auth + Problems)
 
-#### How to run
+The backend foundation is now in place.
 
-```bash
-cd client
-npm install
-npm run dev
-```
+- Auth routes and services exist for register, login, logout, profile fetch,
+  and email verification.
+- Problem listing and slug-based problem retrieval are implemented.
+- Prisma schema, DB config, middleware, and API routing are wired up.
+- The frontend now has a dedicated API client layer for auth and problem APIs.
 
-#### Packages installed (client)
+Status: Mostly implemented, with some production hardening still needed.
 
-```
-@monaco-editor/react, monaco-editor, framer-motion, lucide-react
-```
+---
 
-(next, react, react-dom, tailwindcss already present)
+### Phase 3 — Execution Engine: IMPLEMENTED (sandbox-ready)
+
+The execution layer is implemented and supports both local execution and
+Docker-backed sandbox execution.
+
+- The sandbox service handles JS, Python, C, C++, and Java code.
+- It returns judge-style statuses such as ACCEPTED, WRONG_ANSWER,
+  COMPILATION_ERROR, RUNTIME_ERROR, and TIME_LIMIT_EXCEEDED.
+- Docker-based execution is wired through the environment configuration and
+  is ready for further hardening.
+
+Status: Core engine implemented.
+
+---
+
+### Phase 4 — Practice Submission Pipeline: IMPLEMENTED (backend flow)
+
+The practice submission workflow is now operational end-to-end at the backend level.
+
+- Submissions can be created and processed through the execution pipeline.
+- BullMQ-style job queueing and worker registration are implemented with
+  inline fallback support when Redis is unavailable.
+- Verdicts are persisted to the database and published as events.
+- Socket.IO-style notification hooks are registered for submission verdicts
+  and AI review readiness.
+
+Status: Backend pipeline implemented; frontend wiring still needs polish.
+
+---
+
+### Phase 5 — 1v1 Duel: IMPLEMENTED (core backend flow)
+
+The duel system is implemented at the backend service level.
+
+- Match creation, joining, config submission, lock/start, and finish logic exist.
+- Match participants, ELO rating updates, chat messages, and duel result email
+  jobs are wired.
+- AI-based duel problem selection is integrated into the match start flow.
+
+Status: Core duel backend is implemented.
+
+---
+
+### Phase 6 — Collaborative Editor: IMPLEMENTED (room-based backend)
+
+The collaborative editor feature has its backend foundation implemented.
+
+- Room creation, joining, room lookup, and member management are implemented.
+- The app is set up for room-based collaborative coding sessions.
+- Full real-time CRDT/Yjs sync is not yet integrated, so this remains a
+  strong backend foundation rather than a fully production-grade live sync system.
+
+Status: Room backend implemented; real-time sync still pending.
+
+---
+
+### Phase 7 — AI Integration: IMPLEMENTED (assistant + review + duel selection)
+
+AI integration is now present in multiple parts of the system.
+
+- AI assistant routes support hints, syntax help, and doubt answering.
+- Accepted submissions can trigger AI review generation.
+- The duel flow uses AI to choose a suitable problem based on the shared config.
+- If no API key is configured, the system falls back to mock responses.
+
+Status: Implemented and wired; production-quality AI behavior depends on
+runtime API configuration and tuning.
+
+---
+
+### Overall project state
+
+- Phases 1 through 7 now have substantial implementation coverage.
+- The project has moved beyond a purely mock UI stage into a real backend-driven
+  application foundation.
+- Remaining work is mainly UI integration, real-time production hardening,
+  and deployment readiness.
 
 ---
 
@@ -508,5 +574,221 @@ npm run dev
 
 ---
 
-## END OF CONTEXT
+# CODEARENA — FULL SYSTEM CONTEXT (MASTER FILE)
 
+> Paste this entire file at the start of any new AI chat so it instantly understands the full project.
+
+---
+
+## 1. PROJECT OVERVIEW
+
+CodeArena is a full-stack competitive programming platform — practice DSA, 1v1 duels, collaborative editor, AI assistance, and a custom judge pipeline (stdin/stdout, Codeforces-style).
+
+**Priority features:** Practice → 1v1 Duel → Collab Editor. Contests are optional.
+
+---
+
+## 2. ARCHITECTURE
+
+```
+Frontend (client/)     → Next.js + JavaScript + Tailwind + Monaco + Socket.IO
+Admin UI (admin/)      → Separate Express server + static upload UI (port 5001)
+Backend (server/)      → Express + Prisma + PostgreSQL (Neon)
+Redis                  → ioredis (BullMQ queues, cache, rate limiting)
+Kafka                  → Event streaming (submission.completed, duel.ended)
+Execution              → Custom sandbox (local spawn or Docker)
+AI                     → Cohere API (command-r-plus)
+Auth                   → JWT in httpOnly cookies + email verification required
+```
+
+---
+
+## 3. CODE EXECUTION (JUDGE)
+
+- **Run** (`POST /api/v1/submissions/run`) — tests against **sample** test cases only, compares stdout to `expectedOutput`
+- **Submit** (`POST /api/v1/submissions`) — runs **all** test cases (sample + hidden) via BullMQ worker
+- Languages: JavaScript, Python, C, C++, Java
+- Input/output: **stdin/stdout** format (not LeetCode function style)
+- Local mode: `EXECUTION_ENABLED=false` (default) — runs on host via `child_process`
+- Docker mode: `EXECUTION_ENABLED=true` — compiles + runs inside `codearena-sandbox:latest`
+
+**Docker sandbox build:**
+```bash
+cd server/docker/sandbox
+docker build -t codearena-sandbox:latest .
+```
+
+---
+
+## 4. AUTH & EMAIL VERIFICATION
+
+- Register → verification email sent → user must verify before login
+- Unverified users get **403** on login and on run/submit endpoints
+- Verify link: `{CLIENT_URL}/verify-email?token=...`
+- Frontend auth: `AuthContext` + httpOnly cookies; Navbar shows **Logout** when logged in
+
+---
+
+## 5. ADMIN — PROBLEM UPLOAD
+
+Separate admin app at `admin/` (port **5001**).
+
+**Configure:**
+- Main server `.env`: `ADMIN_API_KEY=your-secret`
+- Admin `.env`: copy from `admin/.env.example`, same `ADMIN_API_KEY`
+
+**Run admin:**
+```bash
+npm run dev:admin
+# or
+npm run dev:all   # client + server + admin
+```
+
+**Upload UI:** http://localhost:5001  
+**Template:** `admin/templates/problem-template.json`
+
+**API:** `POST /api/v1/admin/problems` with header `X-Admin-Key: {ADMIN_API_KEY}`
+
+**Required JSON fields:**
+```json
+{
+  "title", "slug", "statement", "inputFormat", "outputFormat", "constraints",
+  "difficulty": "EASY|MEDIUM|HARD",
+  "testCases": [{ "input", "expectedOutput", "isSample" }],
+  "examples", "tags", "categories", "boilerplates", "timeLimit", "memoryLimit", "isPublished"
+}
+```
+
+---
+
+## 6. COHERE AI
+
+```env
+COHERE_API_KEY=your-key
+COHERE_API_URL=https://api.cohere.ai/v2/chat
+COHERE_MODEL=command-r-plus
+```
+
+Used for: in-editor hints/syntax/doubt, post-submission AI review, duel problem selection.
+
+---
+
+## 7. REDIS (ioredis)
+
+- Package: `ioredis` (not `redis` npm package)
+- Config: `server/src/config/redis.js`
+- BullMQ uses dedicated ioredis connection in `server/src/queues/index.js`
+- Fallback: inline job processing when Redis unavailable
+
+---
+
+## 8. FRONTEND PAGES (real API data)
+
+| Route | Data source |
+|-------|-------------|
+| `/` | `GET /users/stats` |
+| `/practice` | `GET /problems` |
+| `/practice/[slug]` | `GET /problems/:slug`, run/submit APIs |
+| `/dashboard` | `GET /users/dashboard` |
+| `/profile` | `GET /users/profile` |
+| `/login`, `/register`, `/verify-email` | Auth APIs |
+| `/duel`, `/collab` | Duel/Collab APIs + user context |
+| `/contest` | Placeholder (optional feature) |
+
+**No mock data** in production pages — `client/lib/mockData.js` is legacy/unused.
+
+---
+
+## 9. HOW TO RUN (FULL SETUP)
+
+### Prerequisites
+- Node.js 20+
+- PostgreSQL (Neon) — `DATABASE_URL`
+- Redis running locally or remote — `REDIS_URL`
+- (Optional) Kafka — `KAFKA_ENABLED=true`
+- (Optional) Docker for sandbox execution
+- Cohere API key, SMTP for email, Admin API key
+
+### 1. Clone & install
+```bash
+npm install
+cd admin && npm install && cd ..
+```
+
+### 2. Environment
+```bash
+cp .env.example .env
+# Fill in: DATABASE_URL, JWT_SECRET, REDIS_URL, COHERE_API_KEY, SMTP_*, ADMIN_API_KEY
+
+cp admin/.env.example admin/.env
+# Set ADMIN_API_KEY to match main .env
+```
+
+### 3. Database
+```bash
+cd server
+npx prisma migrate deploy
+npx prisma db seed
+```
+
+### 4. (Optional) Docker sandbox
+```bash
+cd server/docker/sandbox
+docker build -t codearena-sandbox:latest .
+# Then set EXECUTION_ENABLED=true in .env
+```
+
+### 5. Start development
+```bash
+# From project root — client (3000) + server (5000)
+npm run dev
+
+# With admin panel (5001)
+npm run dev:all
+```
+
+### 6. URLs
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| API | http://localhost:5000/api/v1 |
+| Health | http://localhost:5000/health |
+| Admin upload | http://localhost:5001 |
+
+### 7. Demo account (after seed)
+- Email: `demo@codearena.dev`
+- Password: `password123`
+- Problem: `/practice/two-sum`
+
+---
+
+## 10. CURRENT STATUS (July 2026)
+
+### Completed
+- Auth with email verification gate on login + run/submit
+- ioredis for cache, rate limit, BullMQ
+- Admin panel for problem upload with JSON template
+- Frontend wired to real APIs (no dummy data on core pages)
+- AuthContext — Navbar/Profile show logout when logged in
+- Users API: dashboard, profile, leaderboard, platform stats
+
+### Optional / partial
+- Contest feature (UI placeholder only)
+- Duel room full Socket.IO sync (backend exists, room UI basic)
+- Yjs collab editor (partial)
+- Docker sandbox deployment on VPS
+
+---
+
+## 11. RULES FOR AI CODERS
+
+- JavaScript only (no TypeScript)
+- Modular: controller → service → routes → validator
+- stdin/stdout problems only — document inputFormat/outputFormat clearly
+- No dummy/mock data in user-facing pages
+- Email must be verified before judge access
+- Use ioredis, not `redis` package
+
+---
+
+> Update this section after every work session.

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { problemsApi, submissionsApi, LANGUAGES } from "@/services/api";
 import { motion } from "framer-motion";
 import {
   ChevronLeft,
@@ -20,54 +21,151 @@ import Select from "@/components/ui/Select";
 import CodeEditor from "@/components/editor/CodeEditor";
 import OutputConsole from "@/components/editor/OutputConsole";
 import AIPanel from "@/components/editor/AIPanel";
-import { problemDetail, languages, aiMessages } from "@/lib/mockData";
 import { formatDifficulty } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 export default function ProblemPage() {
   const params = useParams();
-  const problem = problemDetail;
-  const diff = formatDifficulty(problem.difficulty);
+  const router = useRouter();
+  const { user } = useAuth();
+  const slug = params.slug;
 
+  const [problem, setProblem] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [language, setLanguage] = useState("javascript");
-  const [code, setCode] = useState(problem.boilerplate.javascript);
+  const [code, setCode] = useState("");
   const [output, setOutput] = useState("");
   const [outputStatus, setOutputStatus] = useState("idle");
+  const [runtime, setRuntime] = useState(null);
+  const [memory, setMemory] = useState(null);
   const [showAI, setShowAI] = useState(false);
   const [showOutput, setShowOutput] = useState(true);
   const [running, setRunning] = useState(false);
 
+  useEffect(() => {
+    if (!slug) return;
+    problemsApi
+      .getBySlug(slug)
+      .then((res) => {
+        const p = res.problem || res;
+        setProblem(p);
+        const langs = Object.keys(p.boilerplate || {});
+        const defaultLang = langs.includes("javascript") ? "javascript" : langs[0] || "javascript";
+        setLanguage(defaultLang);
+        setCode(p.boilerplate?.[defaultLang] || "");
+      })
+      .catch(() => setProblem(null))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
   const handleLanguageChange = (e) => {
     const lang = e.target.value;
     setLanguage(lang);
-    setCode(problem.boilerplate[lang] || "");
+    setCode(problem?.boilerplate?.[lang] || "");
   };
 
-  const handleRun = () => {
+  const requireAuth = () => {
+    if (!user) {
+      setOutput("Please sign in and verify your email to run or submit code.");
+      setOutputStatus("error");
+      router.push("/login");
+      return false;
+    }
+    if (!user.emailVerified) {
+      setOutput("Please verify your email before running or submitting code.");
+      setOutputStatus("error");
+      return false;
+    }
+    return true;
+  };
+
+  const handleRun = async () => {
+    if (!requireAuth() || !problem) return;
     setRunning(true);
     setOutputStatus("running");
     setOutput("Running against sample test cases...");
-    setTimeout(() => {
-      setOutput("[0, 1]\n\nAll sample test cases passed.");
-      setOutputStatus("success");
+    setRuntime(null);
+    setMemory(null);
+
+    try {
+      const result = await submissionsApi.run({
+        code,
+        language,
+        problemId: parseInt(problem.id, 10),
+      });
+      const statusLabel = result.status?.replace(/_/g, " ") || "Done";
+      const detail =
+        result.passedTestCases != null
+          ? `\n${result.passedTestCases}/${result.totalTestCases} sample tests passed`
+          : "";
+      setOutput(`${statusLabel}${detail}\n\n${result.output || "No output"}`);
+      setOutputStatus(result.status === "ACCEPTED" ? "success" : "error");
+      setRuntime(result.runtime ? `${result.runtime} ms` : null);
+      setMemory(result.memory ? `${result.memory} MB` : null);
+    } catch (error) {
+      setOutput(error.message || "Run failed");
+      setOutputStatus("error");
+    } finally {
       setRunning(false);
-    }, 1500);
+    }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (!requireAuth() || !problem) return;
     setRunning(true);
     setOutputStatus("running");
-    setOutput("Submitting to judge...");
-    setTimeout(() => {
-      setOutput("Verdict: Accepted\n\nPassed 15/15 test cases\nRuntime: 68 ms (beats 92%)\nMemory: 42.1 MB");
-      setOutputStatus("success");
+    setOutput("Submitting to judge (all test cases)...");
+
+    try {
+      const result = await submissionsApi.submit({
+        code,
+        language,
+        problemId: parseInt(problem.id, 10),
+      });
+      const v = result.verdict;
+      if (v) {
+        const msg = `${v.status.replace(/_/g, " ")} — ${v.passedTestCases}/${v.totalTestCases} tests passed`;
+        setOutput(msg);
+        setOutputStatus(v.status === "ACCEPTED" ? "success" : "error");
+        setRuntime(v.runtime ? `${v.runtime} ms` : null);
+      } else {
+        setOutput(`Submission queued (ID: ${result.submission?.id}). Waiting for verdict...`);
+        setOutputStatus("running");
+      }
+    } catch (error) {
+      setOutput(error.message || "Submission failed");
+      setOutputStatus("error");
+    } finally {
       setRunning(false);
-    }, 2500);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex items-center justify-center text-muted">
+        Loading problem...
+      </div>
+    );
+  }
+
+  if (!problem) {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex flex-col items-center justify-center gap-4">
+        <p className="text-muted">Problem not found.</p>
+        <Link href="/practice" className="text-primary hover:underline">Back to problems</Link>
+      </div>
+    );
+  }
+
+  const diff = formatDifficulty(problem.difficulty);
+  const availableLangs = LANGUAGES.filter(
+    (l) => problem.boilerplate?.[l.value] !== undefined
+  );
+  const langOptions = availableLangs.length > 0 ? availableLangs : LANGUAGES;
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 glass flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 glass shrink-0">
         <div className="flex items-center gap-3">
           <Link href="/practice" className="text-muted hover:text-primary transition-colors">
             <ChevronLeft className="w-5 h-5" />
@@ -89,7 +187,6 @@ export default function ProblemPage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left — Problem statement */}
         <div className="w-full lg:w-[45%] overflow-y-auto scrollbar-thin border-r border-border p-6">
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <div className="flex flex-wrap gap-2 mb-6">
@@ -119,13 +216,19 @@ export default function ProblemPage() {
               ))}
             </div>
 
+            <h3 className="text-sm font-semibold mb-2">Input Format</h3>
+            <pre className="text-sm font-mono text-muted mb-6 whitespace-pre-wrap glass rounded-lg p-4">{problem.inputFormat}</pre>
+
+            <h3 className="text-sm font-semibold mb-2">Output Format</h3>
+            <pre className="text-sm font-mono text-muted mb-6 whitespace-pre-wrap glass rounded-lg p-4">{problem.outputFormat}</pre>
+
             <h3 className="text-sm font-semibold mb-3">Examples</h3>
             {problem.examples.map((ex, i) => (
               <div key={i} className="mb-4 glass rounded-lg p-4">
                 <p className="text-xs text-muted mb-2">Example {i + 1}</p>
-                <pre className="text-sm font-mono text-foreground/80 mb-2">Input: {ex.input}</pre>
-                <pre className="text-sm font-mono text-primary mb-2">Output: {ex.output}</pre>
-                <p className="text-xs text-muted">{ex.explanation}</p>
+                <pre className="text-sm font-mono text-foreground/80 mb-2 whitespace-pre-wrap">Input: {ex.input}</pre>
+                <pre className="text-sm font-mono text-primary mb-2 whitespace-pre-wrap">Output: {ex.output}</pre>
+                {ex.explanation && <p className="text-xs text-muted">{ex.explanation}</p>}
               </div>
             ))}
 
@@ -138,11 +241,10 @@ export default function ProblemPage() {
           </motion.div>
         </div>
 
-        {/* Right — Editor */}
         <div className="hidden lg:flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card shrink-0">
             <Select
-              options={languages}
+              options={langOptions}
               value={language}
               onChange={handleLanguageChange}
               className="w-40"
@@ -172,19 +274,19 @@ export default function ProblemPage() {
 
               <button
                 onClick={() => setShowOutput(!showOutput)}
-                className="flex items-center justify-center gap-1 py-1 border-t border-border bg-card text-xs text-muted hover:text-primary cursor-pointer flex-shrink-0"
+                className="flex items-center justify-center gap-1 py-1 border-t border-border bg-card text-xs text-muted hover:text-primary cursor-pointer shrink-0"
               >
                 {showOutput ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
                 Output
               </button>
 
               {showOutput && (
-                <div className="h-[40%] border-t border-border flex-shrink-0">
+                <div className="h-[40%] border-t border-border shrink-0">
                   <OutputConsole
                     output={output}
                     status={outputStatus}
-                    runtime={outputStatus === "success" ? "68 ms" : null}
-                    memory={outputStatus === "success" ? "42.1 MB" : null}
+                    runtime={runtime}
+                    memory={memory}
                   />
                 </div>
               )}
@@ -193,7 +295,7 @@ export default function ProblemPage() {
             {showAI && (
               <div className="w-[40%] border-l border-border p-2">
                 <AIPanel
-                  messages={aiMessages}
+                  messages={[]}
                   code={code}
                   language={language}
                   problemTitle={problem.title}

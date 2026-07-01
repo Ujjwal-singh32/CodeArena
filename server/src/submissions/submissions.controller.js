@@ -1,6 +1,5 @@
 import * as submissionsService from "./submissions.service.js";
 import { AppError } from "../utils/AppError.js";
-import { requireAuth, requireVerified } from "../middleware/auth.js";
 
 export async function run(req, res, next) {
   try {
@@ -8,9 +7,8 @@ export async function run(req, res, next) {
     if (!code || !language || !problemId) {
       throw new AppError("code, language, and problemId are required", 400);
     }
-    const userId = req.user?.id || 1;
     const result = await submissionsService.runSampleTests({
-      userId,
+      userId: req.user.id,
       problemId: parseInt(problemId, 10),
       code,
       language,
@@ -27,7 +25,6 @@ export async function submit(req, res, next) {
     if (!code || !language || !problemId) {
       throw new AppError("code, language, and problemId are required", 400);
     }
-    if (!req.user) throw new AppError("Authentication required", 401);
 
     const result = await submissionsService.createSubmission({
       userId: req.user.id,
@@ -37,9 +34,18 @@ export async function submit(req, res, next) {
       matchId: matchId ? parseInt(matchId, 10) : null,
     });
 
+    const verdict = result.verdict;
     res.status(202).json({
       submission: result.submission,
-      verdict: result.verdict || null,
+      verdict: verdict
+        ? {
+            status: verdict.status,
+            passedTestCases: verdict.passedTestCases,
+            totalTestCases: verdict.totalTestCases,
+            runtime: verdict.runtime,
+            memory: verdict.memory,
+          }
+        : null,
       jobId: result.jobId || null,
     });
   } catch (err) {
@@ -49,7 +55,6 @@ export async function submit(req, res, next) {
 
 export async function getById(req, res, next) {
   try {
-    if (!req.user) throw new AppError("Authentication required", 401);
     const submission = await submissionsService.getSubmission(req.params.id, req.user.id);
     res.json({ submission });
   } catch (err) {
@@ -57,4 +62,12 @@ export async function getById(req, res, next) {
   }
 }
 
-export { requireAuth, requireVerified };
+export async function listMine(req, res, next) {
+  try {
+    const limit = parseInt(req.query.limit || "20", 10);
+    const submissions = await submissionsService.listUserSubmissions(req.user.id, limit);
+    res.json({ submissions });
+  } catch (err) {
+    next(err);
+  }
+}
