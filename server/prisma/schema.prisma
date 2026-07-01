@@ -1,0 +1,750 @@
+////////////////////////////////////////////////////////////
+// GENERATOR
+////////////////////////////////////////////////////////////
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+////////////////////////////////////////////////////////////
+// DATABASE
+////////////////////////////////////////////////////////////
+
+datasource db {
+  provider = "postgresql"
+}
+
+////////////////////////////////////////////////////////////
+// ENUMS
+////////////////////////////////////////////////////////////
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum ProgrammingLanguage {
+  CPP
+  C
+  JAVA
+  PYTHON
+  JAVASCRIPT
+  TYPESCRIPT
+}
+
+enum SubmissionStatus {
+  PENDING
+  ACCEPTED
+  WRONG_ANSWER
+  COMPILATION_ERROR
+  RUNTIME_ERROR
+  TIME_LIMIT_EXCEEDED
+  MEMORY_LIMIT_EXCEEDED
+}
+
+enum MatchStatus {
+  WAITING
+  RUNNING
+  FINISHED
+  CANCELLED
+}
+
+enum RoomRole {
+  OWNER
+  MEMBER
+}
+
+enum NotificationType {
+  SUBMISSION
+  MATCH
+  SYSTEM
+  AI_REVIEW
+}
+
+////////////////////////////////////////////////////////////
+// USER
+////////////////////////////////////////////////////////////
+
+model User {
+
+  id              Int       @id @default(autoincrement())
+
+  username        String    @unique
+  email           String    @unique
+
+  passwordHash    String
+
+  emailVerified   Boolean   @default(false)
+
+  rating          Int       @default(1500)
+
+  solvedCount     Int       @default(0)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  //////////////////////////////////////////////////////////
+  // RELATIONS
+  //////////////////////////////////////////////////////////
+
+  profile                 UserProfile?
+
+  refreshTokens           RefreshToken[]
+
+  verificationTokens      VerificationToken[]
+
+  submissions             Submission[]
+
+  notifications           Notification[]
+
+  wonMatches              Match[] @relation("Winner")
+
+  chatMessages            ChatMessage[]
+
+  matchParticipants       MatchParticipant[]
+
+  rooms                   Room[]
+
+  roomMemberships         RoomMember[]
+
+  @@index([email])
+  @@index([username])
+}
+
+////////////////////////////////////////////////////////////
+// USER PROFILE
+////////////////////////////////////////////////////////////
+
+model UserProfile {
+
+  id            Int      @id @default(autoincrement())
+
+  bio           String?
+
+  avatar        String?
+
+  github        String?
+
+  linkedin      String?
+
+  leetcode      String?
+
+  codeforces    String?
+
+  codechef      String?
+
+  createdAt     DateTime @default(now())
+
+  updatedAt     DateTime @updatedAt
+
+  //////////////////////////////////////////////////////////
+
+  userId        Int      @unique
+
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+////////////////////////////////////////////////////////////
+// REFRESH TOKEN
+////////////////////////////////////////////////////////////
+
+model RefreshToken {
+
+  id            Int      @id @default(autoincrement())
+
+  token         String   @unique
+
+  expiresAt     DateTime
+
+  revoked       Boolean  @default(false)
+
+  createdAt     DateTime @default(now())
+
+  //////////////////////////////////////////////////////////
+
+  userId        Int
+
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+////////////////////////////////////////////////////////////
+// EMAIL VERIFICATION
+////////////////////////////////////////////////////////////
+
+model VerificationToken {
+
+  id            Int      @id @default(autoincrement())
+
+  token         String   @unique
+
+  expiresAt     DateTime
+
+  createdAt     DateTime @default(now())
+
+  //////////////////////////////////////////////////////////
+
+  userId        Int
+
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+////////////////////////////////////////////////////////////
+// PROBLEM
+////////////////////////////////////////////////////////////
+
+model Problem {
+
+  id                  Int          @id @default(autoincrement())
+
+  title               String
+
+  slug                String       @unique
+
+  statement           String       @db.Text
+
+  inputFormat         String       @db.Text
+
+  outputFormat        String       @db.Text
+
+  constraints         String       @db.Text
+
+  difficulty          Difficulty
+
+  isPublished         Boolean      @default(false)
+
+  timeLimit           Int          @default(2)      // seconds
+
+  memoryLimit         Int          @default(256)    // MB
+
+  submissionCount     Int          @default(0)
+
+  acceptedCount       Int          @default(0)
+
+  createdAt           DateTime     @default(now())
+
+  updatedAt           DateTime     @updatedAt
+
+  /////////////////////////////////////////////////////////
+
+  examples            ProblemExample[]
+
+  testCases           TestCase[]
+
+  boilerplates        BoilerplateCode[]
+
+  categories          ProblemCategory[]
+
+  tags                ProblemTag[]
+
+  submissions         Submission[]
+
+  matchConfigs        MatchConfig[]
+
+  rooms               Room[]
+
+  /////////////////////////////////////////////////////////
+
+  @@index([difficulty])
+
+  @@index([slug])
+
+}
+
+////////////////////////////////////////////////////////////
+// PROBLEM EXAMPLES
+////////////////////////////////////////////////////////////
+
+model ProblemExample {
+
+  id              Int      @id @default(autoincrement())
+
+  input           String   @db.Text
+
+  output          String   @db.Text
+
+  explanation     String?  @db.Text
+
+  order           Int
+
+  /////////////////////////////////////////////////////////
+
+  problemId       Int
+
+  problem         Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+
+}
+
+////////////////////////////////////////////////////////////
+// TEST CASE
+////////////////////////////////////////////////////////////
+
+model TestCase {
+
+  id                  Int      @id @default(autoincrement())
+
+  input               String   @db.Text
+
+  expectedOutput      String   @db.Text
+
+  isSample            Boolean  @default(false)
+
+  createdAt           DateTime @default(now())
+
+  /////////////////////////////////////////////////////////
+
+  problemId           Int
+
+  problem             Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+
+}
+
+////////////////////////////////////////////////////////////
+// BOILERPLATE CODE
+////////////////////////////////////////////////////////////
+
+model BoilerplateCode {
+
+  id                  Int      @id @default(autoincrement())
+
+  language            ProgrammingLanguage
+
+  starterCode         String   @db.Text
+
+  /////////////////////////////////////////////////////////
+
+  problemId           Int
+
+  problem             Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, language])
+
+}
+
+////////////////////////////////////////////////////////////
+// CATEGORY
+////////////////////////////////////////////////////////////
+
+model Category {
+
+  id                  Int      @id @default(autoincrement())
+
+  name                String   @unique
+
+  problems            ProblemCategory[]
+
+}
+
+////////////////////////////////////////////////////////////
+// PROBLEM CATEGORY
+////////////////////////////////////////////////////////////
+
+model ProblemCategory {
+
+  problemId           Int
+
+  categoryId          Int
+
+  /////////////////////////////////////////////////////////
+
+  problem             Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  category            Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([problemId, categoryId])
+
+}
+
+////////////////////////////////////////////////////////////
+// TAG
+////////////////////////////////////////////////////////////
+
+model Tag {
+
+  id                  Int      @id @default(autoincrement())
+
+  name                String   @unique
+
+  problems            ProblemTag[]
+
+}
+
+////////////////////////////////////////////////////////////
+// PROBLEM TAG
+////////////////////////////////////////////////////////////
+
+model ProblemTag {
+
+  problemId           Int
+
+  tagId               Int
+
+  /////////////////////////////////////////////////////////
+
+  problem             Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  tag                 Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([problemId, tagId])
+
+}
+////////////////////////////////////////////////////////////
+// SUBMISSION
+////////////////////////////////////////////////////////////
+
+model Submission {
+
+  id                  Int      @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+  // USER CODE
+  /////////////////////////////////////////////////////////
+
+  language            ProgrammingLanguage
+
+  code                String   @db.Text
+
+  /////////////////////////////////////////////////////////
+  // JUDGE RESULT
+  /////////////////////////////////////////////////////////
+
+  status              SubmissionStatus @default(PENDING)
+
+  runtime             Int?      // milliseconds
+
+  memory              Int?      // MB
+
+  compileOutput       String?   @db.Text
+
+  stdout              String?   @db.Text
+
+  stderr              String?   @db.Text
+
+  passedTestCases     Int?
+
+  totalTestCases      Int?
+
+  /////////////////////////////////////////////////////////
+
+  createdAt           DateTime @default(now())
+
+  /////////////////////////////////////////////////////////
+  // RELATIONS
+  /////////////////////////////////////////////////////////
+
+  userId              Int
+
+  problemId           Int
+
+  matchId             Int?
+
+  user                User @relation(fields: [userId], references: [id])
+
+  problem             Problem @relation(fields: [problemId], references: [id])
+
+  match               Match? @relation(fields: [matchId], references: [id])
+
+  aiReview            AIReview?
+
+  /////////////////////////////////////////////////////////
+
+  @@index([userId])
+
+  @@index([problemId])
+
+  @@index([status])
+
+  @@index([matchId])
+
+}
+
+////////////////////////////////////////////////////////////
+// AI REVIEW
+////////////////////////////////////////////////////////////
+
+model AIReview {
+
+  id                  Int      @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+
+  feedback            String   @db.Text
+
+  timeComplexity      String?
+
+  spaceComplexity     String?
+
+  betterApproach      String?  @db.Text
+
+  unnecessaryCode     String?  @db.Text
+
+  optimizationTips    String?  @db.Text
+
+  /////////////////////////////////////////////////////////
+
+  createdAt           DateTime @default(now())
+
+  /////////////////////////////////////////////////////////
+
+  submissionId        Int      @unique
+
+  submission          Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+}
+
+////////////////////////////////////////////////////////////
+// NOTIFICATION
+////////////////////////////////////////////////////////////
+
+model Notification {
+
+  id                  Int      @id @default(autoincrement())
+
+  title               String
+
+  message             String
+
+  type                NotificationType
+
+  isRead              Boolean @default(false)
+
+  createdAt           DateTime @default(now())
+
+  /////////////////////////////////////////////////////////
+
+  userId              Int
+
+  user                User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+
+}
+
+////////////////////////////////////////////////////////////
+// MATCH
+////////////////////////////////////////////////////////////
+
+model Match {
+
+  id                  Int      @id @default(autoincrement())
+
+  status              MatchStatus @default(WAITING)
+
+  startedAt           DateTime?
+
+  endedAt             DateTime?
+
+  winnerId            Int?
+
+  /////////////////////////////////////////////////////////
+
+  config              MatchConfig?
+
+  participants        MatchParticipant[]
+
+  submissions         Submission[]
+
+  chatMessages        ChatMessage[]
+
+  /////////////////////////////////////////////////////////
+
+  winner              User? @relation("Winner", fields: [winnerId], references: [id])
+
+  createdAt           DateTime @default(now())
+
+  @@index([status])
+
+}
+
+////////////////////////////////////////////////////////////
+// MATCH CONFIG
+////////////////////////////////////////////////////////////
+
+model MatchConfig {
+
+  id                  Int @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+
+  difficulty          Difficulty
+
+  duration            Int
+
+  questionCount       Int
+
+  /////////////////////////////////////////////////////////
+
+  topic               String
+
+  /////////////////////////////////////////////////////////
+
+  isLocked            Boolean @default(false)
+
+  /////////////////////////////////////////////////////////
+
+  matchId             Int @unique
+
+  problemId           Int?
+
+  /////////////////////////////////////////////////////////
+
+  match               Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  problem             Problem? @relation(fields: [problemId], references: [id])
+
+}
+
+////////////////////////////////////////////////////////////
+// MATCH PARTICIPANT
+////////////////////////////////////////////////////////////
+
+model MatchParticipant {
+
+  id                  Int @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+
+  score               Int @default(0)
+
+  ratingBefore        Int
+
+  ratingAfter         Int?
+
+  /////////////////////////////////////////////////////////
+
+  joinedAt            DateTime @default(now())
+
+  /////////////////////////////////////////////////////////
+
+  userId              Int
+
+  matchId             Int
+
+  /////////////////////////////////////////////////////////
+
+  user                User @relation(fields: [userId], references: [id])
+
+  match               Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId,userId])
+
+  @@index([userId])
+
+}
+
+////////////////////////////////////////////////////////////
+// CHAT MESSAGE
+////////////////////////////////////////////////////////////
+
+model ChatMessage {
+
+  id                  Int @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+
+  message             String @db.Text
+
+  /////////////////////////////////////////////////////////
+
+  createdAt           DateTime @default(now())
+
+  /////////////////////////////////////////////////////////
+
+  senderId            Int
+
+  matchId             Int
+
+  /////////////////////////////////////////////////////////
+
+  sender              User @relation(fields: [senderId], references: [id])
+
+  match               Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@index([matchId])
+
+}
+////////////////////////////////////////////////////////////
+// ROOM
+////////////////////////////////////////////////////////////
+
+model Room {
+
+  id                  Int      @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+
+  roomCode            String   @unique
+
+  title               String
+
+  language            ProgrammingLanguage
+
+  isPrivate           Boolean  @default(true)
+
+  maxMembers          Int      @default(5)
+
+  /////////////////////////////////////////////////////////
+
+  createdAt           DateTime @default(now())
+
+  updatedAt           DateTime @updatedAt
+
+  /////////////////////////////////////////////////////////
+
+  ownerId             Int
+
+  problemId           Int?
+
+  /////////////////////////////////////////////////////////
+
+  owner               User @relation(fields: [ownerId], references: [id])
+
+  problem             Problem? @relation(fields: [problemId], references: [id])
+
+  members             RoomMember[]
+
+  @@index([roomCode])
+
+}
+
+////////////////////////////////////////////////////////////
+// ROOM MEMBER
+////////////////////////////////////////////////////////////
+
+model RoomMember {
+
+  id                  Int @id @default(autoincrement())
+
+  /////////////////////////////////////////////////////////
+
+  joinedAt            DateTime @default(now())
+
+  isOnline            Boolean @default(true)
+
+  /////////////////////////////////////////////////////////
+
+  roomId              Int
+
+  userId              Int
+
+  role                RoomRole
+
+  /////////////////////////////////////////////////////////
+
+  room                Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  user                User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId,userId])
+
+  @@index([userId])
+
+}
