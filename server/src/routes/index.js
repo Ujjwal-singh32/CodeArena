@@ -5,6 +5,8 @@ import submissionsRoutes from "../submissions/submissions.routes.js";
 import duelRoutes from "../duel/duel.routes.js";
 import collabRoutes from "../collab/collab.routes.js";
 import aiRoutes from "../ai/ai.routes.js";
+import usersRoutes from "../users/users.routes.js";
+import adminRoutes from "../admin/admin.routes.js";
 
 const router = Router();
 
@@ -14,5 +16,7 @@ router.use("/submissions", submissionsRoutes);
 router.use("/duel", duelRoutes);
 router.use("/collab", collabRoutes);
 router.use("/ai", aiRoutes);
+router.use("/users", usersRoutes);
+router.use("/admin", adminRoutes);
 
 export default router;

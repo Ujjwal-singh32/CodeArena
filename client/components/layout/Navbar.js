@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -12,11 +12,13 @@ import {
   LayoutDashboard,
   User,
   LogIn,
+  LogOut,
   Menu,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Button from "@/components/ui/Button";
+import { useAuth } from "@/context/AuthContext";
 
 const navLinks = [
   { href: "/practice", label: "Practice", icon: Code2 },
@@ -28,7 +30,15 @@ const navLinks = [
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, loading, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleLogout = async () => {
+    await logout();
+    router.push("/");
+    setMobileOpen(false);
+  };
 
   return (
     <nav className="sticky top-0 z-50 glass border-b border-border">
@@ -70,15 +80,22 @@ export default function Navbar() {
             <Link href="/profile">
               <Button variant="ghost" size="sm">
                 <User className="w-4 h-4" />
-                Profile
+                {user ? user.username : "Profile"}
               </Button>
             </Link>
-            <Link href="/login">
-              <Button variant="outline" size="sm">
-                <LogIn className="w-4 h-4" />
-                Sign In
+            {!loading && user ? (
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                <LogOut className="w-4 h-4" />
+                Logout
               </Button>
-            </Link>
+            ) : (
+              <Link href="/login">
+                <Button variant="outline" size="sm">
+                  <LogIn className="w-4 h-4" />
+                  Sign In
+                </Button>
+              </Link>
+            )}
           </div>
 
           <button
@@ -123,9 +140,15 @@ export default function Navbar() {
                 <Link href="/profile" className="flex-1" onClick={() => setMobileOpen(false)}>
                   <Button variant="ghost" size="sm" className="w-full">Profile</Button>
                 </Link>
-                <Link href="/login" className="flex-1" onClick={() => setMobileOpen(false)}>
-                  <Button variant="outline" size="sm" className="w-full">Sign In</Button>
-                </Link>
+                {!loading && user ? (
+                  <Button variant="outline" size="sm" className="flex-1" onClick={handleLogout}>
+                    Logout
+                  </Button>
+                ) : (
+                  <Link href="/login" className="flex-1" onClick={() => setMobileOpen(false)}>
+                    <Button variant="outline" size="sm" className="w-full">Sign In</Button>
+                  </Link>
+                )}
               </div>
             </div>
           </motion.div>

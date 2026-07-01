@@ -12,7 +12,7 @@ async function request(path, options = {}) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.message || data.error || "Request failed");
+    throw new Error(data.error || data.message || "Request failed");
   }
   return data;
 }
@@ -22,7 +22,7 @@ export const authApi = {
   login: (body) => request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   logout: () => request("/auth/logout", { method: "POST" }),
   me: () => request("/auth/me"),
-  verifyEmail: (token) => request(`/auth/verify-email?token=${token}`),
+  verifyEmail: (token) => request(`/auth/verify-email?token=${encodeURIComponent(token)}`),
 };
 
 export const problemsApi = {
@@ -37,6 +37,13 @@ export const submissionsApi = {
   run: (body) => request("/submissions/run", { method: "POST", body: JSON.stringify(body) }),
   submit: (body) => request("/submissions", { method: "POST", body: JSON.stringify(body) }),
   get: (id) => request(`/submissions/${id}`),
+};
+
+export const usersApi = {
+  stats: () => request("/users/stats"),
+  leaderboard: (limit = 10) => request(`/users/leaderboard?limit=${limit}`),
+  dashboard: () => request("/users/dashboard"),
+  profile: () => request("/users/profile"),
 };
 
 export const duelApi = {
@@ -58,6 +65,14 @@ export const collabApi = {
 export const aiApi = {
   assist: (body) => request("/ai/assist", { method: "POST", body: JSON.stringify(body) }),
 };
+
+export const LANGUAGES = [
+  { value: "javascript", label: "JavaScript" },
+  { value: "python", label: "Python" },
+  { value: "cpp", label: "C++" },
+  { value: "c", label: "C" },
+  { value: "java", label: "Java" },
+];
 
 export function getSocketUrl() {
   return process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";

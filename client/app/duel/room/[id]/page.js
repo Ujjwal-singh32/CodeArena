@@ -19,13 +19,16 @@ import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import CodeEditor from "@/components/editor/CodeEditor";
 import OutputConsole from "@/components/editor/OutputConsole";
-import { chatMessages, problemDetail, languages } from "@/lib/mockData";
+import { LANGUAGES, duelApi } from "@/services/api";
 import { formatTime } from "@/lib/utils";
+import { useParams } from "next/navigation";
 
 export default function DuelRoomPage() {
+  const params = useParams();
+  const matchId = params.id;
   const [phase, setPhase] = useState("config");
   const [timer, setTimer] = useState(900);
-  const [chat, setChat] = useState(chatMessages);
+  const [chat, setChat] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [config, setConfig] = useState({
     topic: "Arrays",
@@ -35,10 +38,19 @@ export default function DuelRoomPage() {
   });
   const [myReady, setMyReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
-  const [code, setCode] = useState(problemDetail.boilerplate.javascript);
+  const [code, setCode] = useState("// Write your solution here\n");
   const [language, setLanguage] = useState("javascript");
   const [output, setOutput] = useState("");
   const [outputStatus, setOutputStatus] = useState("idle");
+  const [match, setMatch] = useState(null);
+
+  useEffect(() => {
+    if (!matchId || String(matchId).startsWith("game-")) return;
+    duelApi
+      .get(matchId)
+      .then((res) => setMatch(res.match || res))
+      .catch(() => {});
+  }, [matchId]);
 
   useEffect(() => {
     if (phase !== "coding") return;
@@ -191,14 +203,14 @@ export default function DuelRoomPage() {
             </div>
           ) : (
             <div className="p-4 flex-1 overflow-y-auto scrollbar-thin">
-              <h3 className="text-sm font-semibold mb-2">{problemDetail.title}</h3>
-              <Badge variant={problemDetail.difficulty} className="mb-4">
-                {problemDetail.difficulty}
+              <h3 className="text-sm font-semibold mb-2">
+                {match?.config?.topic || config.topic} Challenge
+              </h3>
+              <Badge variant={match?.config?.difficulty || config.difficulty} className="mb-4">
+                {match?.config?.difficulty || config.difficulty}
               </Badge>
-              <div className="text-sm text-muted leading-relaxed space-y-3">
-                {problemDetail.statement.split("\n").map((line, i) => (
-                  <p key={i}>{line.replace(/\*\*/g, "")}</p>
-                ))}
+              <div className="text-sm text-muted leading-relaxed">
+                <p>Solve the assigned problem before your opponent. Problem details load when the match starts.</p>
               </div>
             </div>
           )}
@@ -250,7 +262,7 @@ export default function DuelRoomPage() {
             <>
               <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card flex-shrink-0">
                 <Select
-                  options={languages}
+                  options={LANGUAGES}
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
                   className="w-40"

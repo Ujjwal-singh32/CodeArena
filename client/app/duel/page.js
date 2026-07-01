@@ -19,9 +19,9 @@ import Badge from "@/components/ui/Badge";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import Tabs from "@/components/ui/Tabs";
-import { duelHistory, currentUser, availableDuels } from "@/lib/mockData";
+import { duelApi, usersApi } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 import { formatRating, formatDifficulty } from "@/lib/utils";
-import { duelApi } from "@/services/api";
 
 const topicOptions = [
   { value: "", label: "All Topics" },
@@ -48,10 +48,12 @@ const ratingOptions = [
 
 export default function DuelLobbyPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [tab, setTab] = useState("join");
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(null);
-  const [games, setGames] = useState(availableDuels);
+  const [games, setGames] = useState([]);
+  const [duelHistory, setDuelHistory] = useState([]);
   const [filters, setFilters] = useState({
     topic: "",
     difficulty: "",
@@ -66,7 +68,16 @@ export default function DuelLobbyPage() {
     title: "",
   });
 
-  const rating = formatRating(currentUser.rating);
+  const rating = formatRating(user?.rating || 1500);
+
+  useEffect(() => {
+    if (user) {
+      usersApi
+        .dashboard()
+        .then((data) => setDuelHistory(data.duelHistory || []))
+        .catch(() => setDuelHistory([]));
+    }
+  }, [user]);
 
   useEffect(() => {
     duelApi
@@ -295,7 +306,7 @@ export default function DuelLobbyPage() {
               <CardTitle>Your Rating</CardTitle>
             </CardHeader>
             <div className="text-center py-4">
-              <p className="text-4xl font-bold text-primary mb-1">{currentUser.rating}</p>
+              <p className="text-4xl font-bold text-primary mb-1">{user?.rating || 1500}</p>
               <p className={`text-sm font-medium ${rating.color}`}>{rating.tier}</p>
             </div>
           </Card>

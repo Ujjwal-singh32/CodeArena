@@ -9,9 +9,11 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import { authApi } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refresh } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,9 +25,15 @@ export default function LoginPage() {
     setError("");
     try {
       await authApi.login({ email, password });
+      await refresh();
       router.push("/dashboard");
     } catch (err) {
-      setError(err.message || "Login failed");
+      const msg = err.message || "Login failed";
+      setError(
+        msg.includes("verify")
+          ? `${msg} If you didn't receive the email, register again or contact support.`
+          : msg
+      );
       setLoading(false);
     }
   };

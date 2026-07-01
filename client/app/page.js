@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import StatCard from "@/components/common/StatCard";
-import { platformStats } from "@/lib/mockData";
+import { usersApi } from "@/services/api";
 
 const features = [
   {
@@ -58,6 +59,20 @@ const highlights = [
 ];
 
 export default function HomePage() {
+  const [stats, setStats] = useState({
+    problems: 0,
+    users: 0,
+    submissions: 0,
+    duels: 0,
+  });
+
+  useEffect(() => {
+    usersApi
+      .stats()
+      .then((res) => setStats(res.stats || { problems: 0, users: 0, submissions: 0, duels: 0 }))
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="grid-bg">
       {/* Hero */}
@@ -109,10 +124,10 @@ export default function HomePage() {
             transition={{ duration: 0.6, delay: 0.3 }}
             className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-20"
           >
-            <StatCard icon={Code2} label="Problems" value={platformStats.totalProblems.toLocaleString()} />
-            <StatCard icon={Users} label="Active Users" value={`${(platformStats.activeUsers / 1000).toFixed(1)}K`} />
-            <StatCard icon={Swords} label="Duels Today" value={platformStats.duelsToday} />
-            <StatCard icon={Zap} label="Submissions Today" value={`${(platformStats.submissionsToday / 1000).toFixed(1)}K`} />
+            <StatCard icon={Code2} label="Problems" value={stats.problems.toLocaleString()} />
+            <StatCard icon={Users} label="Users" value={stats.users.toLocaleString()} />
+            <StatCard icon={Swords} label="Duels" value={stats.duels.toLocaleString()} />
+            <StatCard icon={Zap} label="Submissions" value={stats.submissions.toLocaleString()} />
           </motion.div>
         </div>
       </section>

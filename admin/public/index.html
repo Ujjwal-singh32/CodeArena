@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeArena Admin — Upload Problems</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #070707; color: #eee; min-height: 100vh; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2rem; }
+    h1 { color: #00ff88; margin-bottom: 0.5rem; }
+    .sub { color: #888; margin-bottom: 2rem; }
+    .card { background: #111; border: 1px solid #242424; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.4rem; }
+    textarea { width: 100%; min-height: 360px; background: #0a0a0a; border: 1px solid #333; color: #eee; border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 13px; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
+    button, .btn { background: #00ff88; color: #000; border: none; padding: 0.65rem 1.2rem; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
+    button.secondary { background: #222; color: #eee; border: 1px solid #444; }
+    .msg { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; font-size: 0.9rem; }
+    .msg.ok { background: rgba(0,255,136,0.1); color: #00ff88; border: 1px solid rgba(0,255,136,0.3); }
+    .msg.err { background: rgba(255,80,80,0.1); color: #ff6666; border: 1px solid rgba(255,80,80,0.3); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #222; }
+    th { color: #888; font-weight: 500; }
+    code { background: #1a1a1a; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
+    ul { margin: 0.5rem 0 0 1.2rem; color: #aaa; font-size: 0.9rem; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>CodeArena Admin</h1>
+    <p class="sub">Upload competitive programming problems in JSON format</p>
+
+    <div class="card">
+      <h2 style="margin-bottom:1rem;font-size:1.1rem;">Required JSON format</h2>
+      <ul>
+        <li><code>title</code>, <code>slug</code>, <code>statement</code>, <code>inputFormat</code>, <code>outputFormat</code>, <code>constraints</code></li>
+        <li><code>difficulty</code>: EASY | MEDIUM | HARD</li>
+        <li><code>testCases</code>: array with <code>input</code>, <code>expectedOutput</code>, optional <code>isSample</code></li>
+        <li><code>examples</code>, <code>tags</code>, <code>categories</code>, <code>boilerplates</code> (optional but recommended)</li>
+        <li>Users must follow <code>inputFormat</code> — stdin/stdout judging like Codeforces</li>
+      </ul>
+      <div class="row">
+        <a class="btn secondary" href="/templates/problem-template.json" download>Download template</a>
+        <button type="button" class="secondary" id="loadTemplate">Load template into editor</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="json">Problem JSON</label>
+      <textarea id="json" placeholder="Paste problem JSON here..."></textarea>
+      <div class="row">
+        <button type="button" id="upload">Upload Problem</button>
+        <button type="button" class="secondary" id="validate">Validate JSON</button>
+        <button type="button" class="secondary" id="refresh">Refresh list</button>
+      </div>
+      <div id="message"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-bottom:1rem;font-size:1.1rem;">Existing problems</h2>
+      <div id="problems">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    const jsonEl = document.getElementById("json");
+    const msgEl = document.getElementById("message");
+    const problemsEl = document.getElementById("problems");
+
+    function showMsg(text, ok) {
+      msgEl.className = "msg " + (ok ? "ok" : "err");
+      msgEl.textContent = text;
+    }
+
+    document.getElementById("loadTemplate").onclick = async () => {
+      const res = await fetch("/templates/problem-template.json");
+      jsonEl.value = await res.text();
+      showMsg("Template loaded.", true);
+    };
+
+    document.getElementById("validate").onclick = () => {
+      try {
+        JSON.parse(jsonEl.value);
+        showMsg("Valid JSON.", true);
+      } catch (e) {
+        showMsg("Invalid JSON: " + e.message, false);
+      }
+    };
+
+    document.getElementById("upload").onclick = async () => {
+      try {
+        const body = JSON.parse(jsonEl.value);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message || "Upload failed");
+        showMsg("Problem uploaded: " + (data.problem?.title || body.title), true);
+        loadProblems();
+      } catch (e) {
+        showMsg(e.message, false);
+      }
+    };
+
+    async function loadProblems() {
+      try {
+        const res = await fetch("/api/problems");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load");
+        const rows = (data.problems || []).map((p) =>
+          `<tr><td>${p.id}</td><td>${p.title}</td><td>${p.slug}</td><td>${p.difficulty}</td><td>${p.isPublished ? "Yes" : "No"}</td></tr>`
+        ).join("");
+        problemsEl.innerHTML = rows
+          ? `<table><thead><tr><th>ID</th><th>Title</th><th>Slug</th><th>Level</th><th>Published</th></tr></thead><tbody>${rows}</tbody></table>`
+          : "<p style='color:#888'>No problems yet.</p>";
+      } catch (e) {
+        problemsEl.innerHTML = `<p style='color:#f66'>${e.message}</p>`;
+      }
+    }
+
+    document.getElementById("refresh").onclick = loadProblems;
+    loadProblems();
+  </script>
+</body>
+</html>
