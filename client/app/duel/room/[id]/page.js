@@ -266,7 +266,7 @@ export default function DuelRoomPage() {
               </div>
               <div className="flex-1 flex flex-col overflow-hidden">
                 <div className="flex-1">
-                  <CodeEditor value={code} onChange={(v) => setCode(v || "")} language={language} height="100%" />
+                  <CodeEditor value={code} onChange={setCode} language={language} height="100%" />
                 </div>
                 <div className="h-[30%] border-t border-border">
                   <OutputConsole output={output} status={outputStatus} />

@@ -168,7 +168,7 @@ export const duelHistory = [
   { id: "3", opponent: "stack_overflow", result: "WIN", ratingChange: "+21", date: "2026-06-24", topic: "DP" },
 ];
 
-export const topicProgress = [
+export const availableDuels = [
   { topic: "Arrays", solved: 32, total: 45, percentage: 71 },
   { topic: "Strings", solved: 18, total: 30, percentage: 60 },
   { topic: "Trees", solved: 12, total: 28, percentage: 43 },
@@ -188,6 +188,57 @@ export const leaderboard = [
   { rank: 3, username: "code_ninja", rating: 2654, solved: 356 },
   { rank: 4, username: "dsa_king", rating: 2589, solved: 341 },
   { rank: 5, username: "code_warrior", rating: 1642, solved: 127, isCurrentUser: true },
+];
+
+export const topicProgress = [
+  {
+    id: "duel-1",
+    title: "Array Showdown",
+    creator: "algo_master",
+    creatorRating: 1842,
+    topic: "Arrays",
+    difficulty: "MEDIUM",
+    duration: 15,
+    questionCount: 1,
+    status: "WAITING",
+    playerCount: 1,
+  },
+  {
+    id: "duel-2",
+    title: "Graph Grapple",
+    creator: "dev_ninja",
+    creatorRating: 1560,
+    topic: "Graphs",
+    difficulty: "HARD",
+    duration: 20,
+    questionCount: 1,
+    status: "WAITING",
+    playerCount: 1,
+  },
+  {
+    id: "duel-3",
+    title: "String Sprint",
+    creator: "byte_coder",
+    creatorRating: 1320,
+    topic: "Strings",
+    difficulty: "EASY",
+    duration: 10,
+    questionCount: 1,
+    status: "WAITING",
+    playerCount: 1,
+  },
+  {
+    id: "duel-4",
+    title: "DP Duel",
+    creator: "stack_master",
+    creatorRating: 2100,
+    topic: "DP",
+    difficulty: "HARD",
+    duration: 30,
+    questionCount: 2,
+    status: "WAITING",
+    playerCount: 1,
+  },
 ];
 
 export const contests = [

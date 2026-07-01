@@ -1,0 +1,250 @@
+import prisma from "../config/db.js";
+import { AppError } from "../utils/AppError.js";
+import { addEmailJob } from "../queues/index.js";
+import { publishEvent } from "../config/kafka.js";
+import { selectDuelProblem } from "../ai/ai.service.js";
+
+export async function createMatch(userId, { topic, difficulty, questionCount, duration, title }) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new AppError("User not found", 404);
+
+  const match = await prisma.match.create({
+    data: {
+      status: "WAITING",
+      config: {
+        create: {
+          topic,
+          difficulty,
+          questionCount: parseInt(questionCount, 10),
+          duration: parseInt(duration, 10),
+        },
+      },
+      participants: {
+        create: {
+          userId,
+          ratingBefore: user.rating,
+        },
+      },
+    },
+    include: {
+      config: true,
+      participants: { include: { user: { select: { username: true, rating: true } } } },
+    },
+  });
+
+  return formatMatch(match, title);
+}
+
+export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax }) {
+  const matches = await prisma.match.findMany({
+    where: {
+      status: "WAITING",
+      participants: { every: {} },
+    },
+    include: {
+      config: true,
+      participants: {
+        include: { user: { select: { username: true, rating: true } } },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  return matches
+    .filter((m) => m.participants.length < 2)
+    .filter((m) => !topic || m.config?.topic === topic)
+    .filter((m) => !difficulty || m.config?.difficulty === difficulty)
+    .filter((m) => {
+      const rating = m.participants[0]?.user?.rating || 1500;
+      if (ratingMin && rating < ratingMin) return false;
+      if (ratingMax && rating > ratingMax) return false;
+      return true;
+    })
+    .map((m) => formatMatch(m));
+}
+
+export async function joinMatch(matchId, userId) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { participants: true, config: true },
+  });
+
+  if (!match) throw new AppError("Match not found", 404);
+  if (match.status !== "WAITING") throw new AppError("Match is not open", 400);
+  if (match.participants.length >= 2) throw new AppError("Room is full", 400);
+  if (match.participants.some((p) => p.userId === userId)) {
+    throw new AppError("Already in this match", 400);
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  await prisma.matchParticipant.create({
+    data: { matchId, userId, ratingBefore: user.rating },
+  });
+
+  return getMatch(matchId);
+}
+
+export async function getMatch(matchId) {
+  const match = await prisma.match.findUnique({
+    where: { id: parseInt(matchId, 10) || 0 },
+    include: {
+      config: { include: { problem: true } },
+      participants: { include: { user: { select: { id: true, username: true, rating: true } } } },
+      chatMessages: {
+        include: { sender: { select: { username: true } } },
+        orderBy: { createdAt: "asc" },
+        take: 100,
+      },
+    },
+  });
+  if (!match) throw new AppError("Match not found", 404);
+  return formatMatchDetail(match);
+}
+
+export async function submitMatchConfig(matchId, userId, config) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { config: true, participants: true },
+  });
+  if (!match) throw new AppError("Match not found", 404);
+  if (!match.participants.some((p) => p.userId === userId)) {
+    throw new AppError("Not a participant", 403);
+  }
+
+  await prisma.matchConfig.update({
+    where: { matchId },
+    data: {
+      topic: config.topic,
+      difficulty: config.difficulty,
+      questionCount: parseInt(config.questionCount, 10),
+      duration: parseInt(config.duration, 10),
+    },
+  });
+
+  return getMatch(matchId);
+}
+
+export async function lockAndStartMatch(matchId) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { config: true, participants: { include: { user: true } } },
+  });
+  if (!match || match.participants.length < 2) {
+    throw new AppError("Need 2 players to start", 400);
+  }
+
+  const problemId = await selectDuelProblem(match.config);
+
+  await prisma.matchConfig.update({
+    where: { matchId },
+    data: { isLocked: true, problemId },
+  });
+
+  await prisma.match.update({
+    where: { id: matchId },
+    data: { status: "RUNNING", startedAt: new Date() },
+  });
+
+  return getMatch(matchId);
+}
+
+export async function finishMatch(matchId, winnerId) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { participants: { include: { user: true } } },
+  });
+  if (!match) throw new AppError("Match not found", 404);
+
+  const updates = calculateElo(match.participants, winnerId);
+
+  await prisma.$transaction([
+    prisma.match.update({
+      where: { id: matchId },
+      data: { status: "FINISHED", endedAt: new Date(), winnerId },
+    }),
+    ...updates.map((u) =>
+      prisma.matchParticipant.update({
+        where: { id: u.participantId },
+        data: { ratingAfter: u.ratingAfter, score: u.score },
+      })
+    ),
+    ...updates.map((u) =>
+      prisma.user.update({
+        where: { id: u.userId },
+        data: { rating: u.ratingAfter },
+      })
+    ),
+  ]);
+
+  await publishEvent("duel.ended", { event: "duel.ended", matchId, winnerId });
+
+  for (const u of updates) {
+    const participant = match.participants.find((p) => p.userId === u.userId);
+    await addEmailJob({
+      type: "duel-result",
+      email: participant.user.email,
+      won: u.userId === winnerId,
+      ratingChange: u.ratingAfter - u.ratingBefore,
+      opponent: match.participants.find((p) => p.userId !== u.userId)?.user.username,
+    });
+  }
+
+  return getMatch(matchId);
+}
+
+function calculateElo(participants, winnerId) {
+  const [a, b] = participants;
+  const ratingA = a.ratingBefore;
+  const ratingB = b.ratingBefore;
+  const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
+  const expectedB = 1 - expectedA;
+  const scoreA = a.userId === winnerId ? 1 : 0;
+  const scoreB = 1 - scoreA;
+  const k = 32;
+  const newA = Math.round(ratingA + k * (scoreA - expectedA));
+  const newB = Math.round(ratingB + k * (scoreB - expectedB));
+
+  return [
+    { participantId: a.id, userId: a.userId, ratingBefore: ratingA, ratingAfter: newA, score: scoreA },
+    { participantId: b.id, userId: b.userId, ratingBefore: ratingB, ratingAfter: newB, score: scoreB },
+  ];
+}
+
+function formatMatch(match, title) {
+  const creator = match.participants[0]?.user;
+  return {
+    id: String(match.id),
+    title: title || `${match.config?.topic || "Open"} Duel`,
+    creator: creator?.username || "unknown",
+    creatorRating: creator?.rating || 1500,
+    topic: match.config?.topic,
+    difficulty: match.config?.difficulty,
+    duration: match.config?.duration,
+    questionCount: match.config?.questionCount,
+    status: match.status,
+    playerCount: match.participants?.length || 1,
+  };
+}
+
+function formatMatchDetail(match) {
+  return {
+    ...formatMatch(match),
+    config: match.config,
+    participants: match.participants.map((p) => ({
+      id: p.user.id,
+      username: p.user.username,
+      rating: p.user.rating,
+      ratingBefore: p.ratingBefore,
+    })),
+    chat: match.chatMessages?.map((m) => ({
+      id: String(m.id),
+      sender: m.sender.username,
+      message: m.message,
+      time: m.createdAt.toISOString(),
+    })),
+    startedAt: match.startedAt,
+    endedAt: match.endedAt,
+    winnerId: match.winnerId,
+  };
+}

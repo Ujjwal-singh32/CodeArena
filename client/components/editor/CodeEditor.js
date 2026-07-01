@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
 
@@ -19,14 +20,43 @@ export default function CodeEditor({
   height = "100%",
   readOnly = false,
   className,
+  onMount: onMountProp,
 }) {
+  const containerRef = useRef(null);
+  const [editorHeight, setEditorHeight] = useState(400);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateHeight = () => {
+      const h = el.getBoundingClientRect().height;
+      if (h > 0) setEditorHeight(h);
+    };
+
+    updateHeight();
+    const ro = new ResizeObserver(updateHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const handleMount = (editor, monaco) => {
+    editor.focus();
+    onMountProp?.(editor, monaco);
+  };
+
   return (
-    <div className={cn("rounded-lg overflow-hidden border border-border", className)}>
+    <div
+      ref={containerRef}
+      className={cn("h-full w-full min-h-[200px] overflow-hidden", className)}
+      style={height !== "100%" ? { height } : undefined}
+    >
       <MonacoEditor
-        height={height}
+        height={editorHeight}
         language={language}
         value={value}
-        onChange={onChange}
+        onChange={(val) => onChange?.(val ?? "")}
+        onMount={handleMount}
         theme="vs-dark"
         options={{
           minimap: { enabled: false },
@@ -41,6 +71,7 @@ export default function CodeEditor({
           renderLineHighlight: "line",
           cursorBlinking: "smooth",
           smoothScrolling: true,
+          wordWrap: "on",
         }}
       />
     </div>
