@@ -1,0 +1,60 @@
+import * as submissionsService from "./submissions.service.js";
+import { AppError } from "../utils/AppError.js";
+import { requireAuth, requireVerified } from "../middleware/auth.js";
+
+export async function run(req, res, next) {
+  try {
+    const { code, language, problemId } = req.body;
+    if (!code || !language || !problemId) {
+      throw new AppError("code, language, and problemId are required", 400);
+    }
+    const userId = req.user?.id || 1;
+    const result = await submissionsService.runSampleTests({
+      userId,
+      problemId: parseInt(problemId, 10),
+      code,
+      language,
+    });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function submit(req, res, next) {
+  try {
+    const { code, language, problemId, matchId } = req.body;
+    if (!code || !language || !problemId) {
+      throw new AppError("code, language, and problemId are required", 400);
+    }
+    if (!req.user) throw new AppError("Authentication required", 401);
+
+    const result = await submissionsService.createSubmission({
+      userId: req.user.id,
+      problemId: parseInt(problemId, 10),
+      code,
+      language,
+      matchId: matchId ? parseInt(matchId, 10) : null,
+    });
+
+    res.status(202).json({
+      submission: result.submission,
+      verdict: result.verdict || null,
+      jobId: result.jobId || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getById(req, res, next) {
+  try {
+    if (!req.user) throw new AppError("Authentication required", 401);
+    const submission = await submissionsService.getSubmission(req.params.id, req.user.id);
+    res.json({ submission });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export { requireAuth, requireVerified };

@@ -9,6 +9,7 @@ import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import { languages } from "@/lib/mockData";
+import { collabApi } from "@/services/api";
 
 export default function CollabPage() {
   const [mode, setMode] = useState(null);
@@ -18,10 +19,16 @@ export default function CollabPage() {
   const [roomTitle, setRoomTitle] = useState("");
   const [roomLang, setRoomLang] = useState("javascript");
 
-  const handleCreate = () => {
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setRoomCode(code);
-    setMode("created");
+  const handleCreate = async () => {
+    try {
+      const res = await collabApi.create({ title: roomTitle, language: roomLang });
+      setRoomCode(res.room.roomCode);
+      setMode("created");
+    } catch {
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      setRoomCode(code);
+      setMode("created");
+    }
   };
 
   const handleJoin = () => {

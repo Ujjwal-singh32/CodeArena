@@ -161,10 +161,10 @@ export default function ProblemPage() {
 
           <div className="flex-1 flex overflow-hidden">
             <div className={`flex flex-col transition-all ${showAI ? "w-[60%]" : "w-full"}`}>
-              <div className={`flex-1 ${showOutput ? "h-[60%]" : "h-full"}`}>
+              <div className={`flex-1 min-h-0 ${showOutput ? "h-[60%]" : "h-full"}`}>
                 <CodeEditor
                   value={code}
-                  onChange={(val) => setCode(val || "")}
+                  onChange={setCode}
                   language={language}
                   height="100%"
                 />
@@ -192,7 +192,13 @@ export default function ProblemPage() {
 
             {showAI && (
               <div className="w-[40%] border-l border-border p-2">
-                <AIPanel messages={aiMessages} />
+                <AIPanel
+                  messages={aiMessages}
+                  code={code}
+                  language={language}
+                  problemTitle={problem.title}
+                  problemId={problem.id}
+                />
               </div>
             )}
           </div>

@@ -2,22 +2,41 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Code2, ArrowRight } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
+import { authApi } from "@/services/api";
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [form, setForm] = useState({ username: "", email: "", password: "", confirm: "" });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (form.password !== form.confirm) {
+      setError("Passwords do not match");
+      return;
+    }
     setLoading(true);
-    setTimeout(() => {
-      window.location.href = "/dashboard";
-    }, 1000);
+    setError("");
+    try {
+      await authApi.register({
+        username: form.username,
+        email: form.email,
+        password: form.password,
+      });
+      setSuccess("Account created! Check your email to verify, then sign in.");
+      setTimeout(() => router.push("/login"), 2000);
+    } catch (err) {
+      setError(err.message || "Registration failed");
+      setLoading(false);
+    }
   };
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
@@ -39,6 +58,12 @@ export default function RegisterPage() {
 
         <Card glow>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <p className="text-sm text-danger bg-danger/10 px-3 py-2 rounded-lg">{error}</p>
+            )}
+            {success && (
+              <p className="text-sm text-primary bg-primary/10 px-3 py-2 rounded-lg">{success}</p>
+            )}
             <Input
               label="Username"
               placeholder="code_warrior"
