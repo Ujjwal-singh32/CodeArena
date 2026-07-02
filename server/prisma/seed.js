@@ -62,6 +62,49 @@ int main() {
 }
 `;
 
+const javaBoilerplate = `import java.util.*;
+import java.io.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        BufferedReader br = new BufferedReader(new FileReader("input.txt"));
+        String line = br.readLine();
+        String[] parts = line.trim().split("\\\\s+");
+        int[] nums = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) nums[i] = Integer.parseInt(parts[i]);
+        int target = Integer.parseInt(br.readLine().trim());
+        Map<Integer, Integer> seen = new HashMap<>();
+        for (int i = 0; i < nums.length; i++) {
+            if (seen.containsKey(target - nums[i])) {
+                System.out.println(seen.get(target - nums[i]) + " " + i);
+                return;
+            }
+            seen.put(nums[i], i);
+        }
+    }
+}
+`;
+
+const cBoilerplate = `#include <stdio.h>
+
+int main() {
+    freopen("input.txt", "r", stdin);
+    int nums[10000], n = 0, x;
+    while (scanf("%d", &x) == 1) nums[n++] = x;
+    int target = nums[--n];
+    n--;
+    for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+            if (nums[i] + nums[j] == target) {
+                printf("%d %d\\n", i, j);
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+`;
+
 async function main() {
   const passwordHash = await bcrypt.hash("password123", 12);
 
@@ -141,6 +184,8 @@ async function main() {
           { language: "JAVASCRIPT", starterCode: jsBoilerplate },
           { language: "PYTHON", starterCode: pyBoilerplate },
           { language: "CPP", starterCode: cppBoilerplate },
+          { language: "JAVA", starterCode: javaBoilerplate },
+          { language: "C", starterCode: cBoilerplate },
         ],
       },
       tags: {

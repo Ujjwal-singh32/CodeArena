@@ -3,6 +3,17 @@ import { AppError } from "../utils/AppError.js";
 import { addEmailJob } from "../queues/index.js";
 import { publishEvent } from "../config/kafka.js";
 import { selectDuelProblem } from "../ai/ai.service.js";
+import { getIo } from "../sockets/io.js";
+
+const readyPlayers = new Map();
+
+function emitMatchUpdate(matchId, match) {
+  getIo()?.to(`duel:${matchId}`).emit("duel:match-update", { match });
+}
+
+function clearReady(matchId) {
+  readyPlayers.delete(matchId);
+}
 
 export async function createMatch(userId, { topic, difficulty, questionCount, duration, title }) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -82,7 +93,9 @@ export async function joinMatch(matchId, userId) {
     data: { matchId, userId, ratingBefore: user.rating },
   });
 
-  return getMatch(matchId);
+  const updated = await getMatch(matchId);
+  emitMatchUpdate(matchId, updated);
+  return updated;
 }
 
 export async function getMatch(matchId) {
@@ -111,6 +124,9 @@ export async function submitMatchConfig(matchId, userId, config) {
   if (!match.participants.some((p) => p.userId === userId)) {
     throw new AppError("Not a participant", 403);
   }
+  if (match.config?.isLocked) {
+    throw new AppError("Match config is locked", 400);
+  }
 
   await prisma.matchConfig.update({
     where: { matchId },
@@ -122,7 +138,18 @@ export async function submitMatchConfig(matchId, userId, config) {
     },
   });
 
-  return getMatch(matchId);
+  if (!readyPlayers.has(matchId)) readyPlayers.set(matchId, new Set());
+  readyPlayers.get(matchId).add(userId);
+
+  const updated = await getMatch(matchId);
+  emitMatchUpdate(matchId, updated);
+  getIo()?.to(`duel:${matchId}`).emit("duel:player-ready", { userId });
+
+  if (readyPlayers.get(matchId).size >= 2 && match.participants.length >= 2) {
+    return lockAndStartMatch(matchId);
+  }
+
+  return updated;
 }
 
 export async function lockAndStartMatch(matchId) {
@@ -146,7 +173,11 @@ export async function lockAndStartMatch(matchId) {
     data: { status: "RUNNING", startedAt: new Date() },
   });
 
-  return getMatch(matchId);
+  clearReady(matchId);
+  const updated = await getMatch(matchId);
+  emitMatchUpdate(matchId, updated);
+  getIo()?.to(`duel:${matchId}`).emit("duel:started", { matchId, match: updated });
+  return updated;
 }
 
 export async function finishMatch(matchId, winnerId) {
@@ -228,9 +259,28 @@ function formatMatch(match, title) {
 }
 
 function formatMatchDetail(match) {
+  const problem = match.config?.problem;
   return {
     ...formatMatch(match),
-    config: match.config,
+    config: match.config
+      ? {
+          ...match.config,
+          problem: problem
+            ? {
+                id: String(problem.id),
+                slug: problem.slug,
+                title: problem.title,
+                statement: problem.statement,
+                difficulty: problem.difficulty,
+                inputFormat: problem.inputFormat,
+                outputFormat: problem.outputFormat,
+                constraints: problem.constraints?.split("\n").filter(Boolean) || [],
+                timeLimit: problem.timeLimit,
+                memoryLimit: problem.memoryLimit,
+              }
+            : null,
+        }
+      : null,
     participants: match.participants.map((p) => ({
       id: p.user.id,
       username: p.user.username,
@@ -240,6 +290,7 @@ function formatMatchDetail(match) {
     chat: match.chatMessages?.map((m) => ({
       id: String(m.id),
       sender: m.sender.username,
+      senderId: m.senderId,
       message: m.message,
       time: m.createdAt.toISOString(),
     })),

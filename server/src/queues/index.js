@@ -1,6 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import Redis from "ioredis";
 import { env } from "../config/env.js";
+import { isRedisReady } from "../config/redis.js";
 
 const QUEUE_NAMES = {
   EXECUTION: "execution",
@@ -26,6 +27,7 @@ function getBullConnection() {
 const queues = {};
 
 export function getQueue(name) {
+  if (!isRedisReady()) return null;
   if (queues[name]) return queues[name];
   const connection = getBullConnection();
   if (!connection) return null;
@@ -35,23 +37,38 @@ export function getQueue(name) {
 
 export async function addExecutionJob(data) {
   const queue = getQueue(QUEUE_NAMES.EXECUTION);
-  if (!queue) return processInline("execution", data);
-  const job = await queue.add("judge", data, { attempts: 2, backoff: 1000 });
-  return { jobId: job.id, inline: false };
+  if (!queue) return processInline(QUEUE_NAMES.EXECUTION, data);
+  try {
+    const job = await queue.add("judge", data, { attempts: 2, backoff: 1000 });
+    return { jobId: job.id, inline: false };
+  } catch (err) {
+    console.warn("BullMQ execution enqueue failed, processing inline:", err.message);
+    return processInline(QUEUE_NAMES.EXECUTION, data);
+  }
 }
 
 export async function addAiReviewJob(data) {
   const queue = getQueue(QUEUE_NAMES.AI_REVIEW);
-  if (!queue) return processInline("ai-review", data);
-  const job = await queue.add("review", data, { attempts: 2 });
-  return { jobId: job.id, inline: false };
+  if (!queue) return processInline(QUEUE_NAMES.AI_REVIEW, data);
+  try {
+    const job = await queue.add("review", data, { attempts: 2 });
+    return { jobId: job.id, inline: false };
+  } catch (err) {
+    console.warn("BullMQ AI review enqueue failed, processing inline:", err.message);
+    return processInline(QUEUE_NAMES.AI_REVIEW, data);
+  }
 }
 
 export async function addEmailJob(data) {
   const queue = getQueue(QUEUE_NAMES.EMAIL);
-  if (!queue) return processInline("email", data);
-  const job = await queue.add("send", data, { attempts: 3 });
-  return { jobId: job.id, inline: false };
+  if (!queue) return processInline(QUEUE_NAMES.EMAIL, data);
+  try {
+    const job = await queue.add("send", data, { attempts: 3 });
+    return { jobId: job.id, inline: false };
+  } catch (err) {
+    console.warn("BullMQ email enqueue failed, processing inline:", err.message);
+    return processInline(QUEUE_NAMES.EMAIL, data);
+  }
 }
 
 const inlineHandlers = {};
@@ -70,11 +87,10 @@ async function processInline(type, data) {
 }
 
 export function createWorker(name, processor) {
+  registerInlineHandler(name, processor);
+  if (!isRedisReady()) return null;
   const connection = getBullConnection();
-  if (!connection) {
-    registerInlineHandler(name, processor);
-    return null;
-  }
+  if (!connection) return null;
   return new Worker(name, async (job) => processor(job.data), { connection });
 }
 

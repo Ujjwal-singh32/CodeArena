@@ -1,4 +1,5 @@
 import prisma from "../config/db.js";
+import { finishMatch } from "../duel/duel.service.js";
 
 const collabRooms = new Map();
 
@@ -19,11 +20,16 @@ export function setupSockets(io) {
     // ── Collab (Yjs sync + chat) ──
     socket.on("collab:join", ({ roomCode, userId, username, color }) => {
       const room = getCollabRoom(roomCode);
-      const id = userId || socket.id;
-      room.users.set(socket.id, { id, name: username || "guest", color: color || "#00ff88" });
+      const odId = String(userId || socket.id);
+      room.users.set(socket.id, {
+        id: socket.id,
+        odId,
+        name: username || "guest",
+        color: color || "#00ff88",
+      });
       socket.join(`collab:${roomCode.toUpperCase()}`);
       socket.collabRoom = roomCode.toUpperCase();
-      socket.collabUserId = id;
+      socket.collabUserId = odId;
 
       if (room.docState) {
         socket.emit("collab:sync", { update: room.docState });
@@ -42,12 +48,15 @@ export function setupSockets(io) {
       socket.to(`collab:${roomCode.toUpperCase()}`).emit("collab:awareness", { update });
     });
 
-    socket.on("collab:chat", ({ roomCode, sender, message, isAi }) => {
-      io.to(`collab:${roomCode.toUpperCase()}`).emit("collab:chat", {
+    socket.on("collab:chat", ({ roomCode, sender, message, isAi, senderSocketId, clientMsgId }) => {
+      const payload = {
         sender,
         message,
         isAi: !!isAi,
-      });
+        senderSocketId: senderSocketId || socket.id,
+        clientMsgId: clientMsgId || null,
+      };
+      socket.to(`collab:${roomCode.toUpperCase()}`).emit("collab:chat", payload);
     });
 
     socket.on("collab:leave", ({ roomCode }) => {
@@ -61,7 +70,7 @@ export function setupSockets(io) {
       socket.duelUserId = userId;
     });
 
-    socket.on("duel:chat", async ({ matchId, message, senderId }) => {
+    socket.on("duel:chat", async ({ matchId, message, senderId, clientMsgId }) => {
       try {
         const msg = await prisma.chatMessage.create({
           data: { matchId: parseInt(matchId, 10), senderId, message },
@@ -69,17 +78,14 @@ export function setupSockets(io) {
         });
         io.to(`duel:${matchId}`).emit("duel:chat", {
           id: String(msg.id),
+          clientMsgId: clientMsgId || null,
           sender: msg.sender.username,
+          senderId,
           message: msg.message,
           time: msg.createdAt.toISOString(),
         });
       } catch (err) {
-        io.to(`duel:${matchId}`).emit("duel:chat", {
-          id: Date.now().toString(),
-          sender: "User",
-          message,
-          time: new Date().toISOString(),
-        });
+        console.error("duel:chat error:", err.message);
       }
     });
 
@@ -91,8 +97,13 @@ export function setupSockets(io) {
       io.to(`duel:${matchId}`).emit("duel:started", { matchId });
     });
 
-    socket.on("duel:submit-win", ({ matchId, winnerId }) => {
-      io.to(`duel:${matchId}`).emit("duel:finished", { matchId, winnerId });
+    socket.on("duel:submit-win", async ({ matchId, winnerId }) => {
+      try {
+        const match = await finishMatch(parseInt(matchId, 10), winnerId);
+        io.to(`duel:${matchId}`).emit("duel:finished", { matchId, winnerId, match });
+      } catch (err) {
+        console.error("duel:submit-win error:", err.message);
+      }
     });
 
     socket.on("disconnect", () => {
@@ -112,6 +123,12 @@ function leaveCollabRoom(socket, io, roomCode) {
 
 function broadcastCollabUsers(io, roomCode) {
   const room = getCollabRoom(roomCode);
-  const users = Array.from(room.users.values());
+  const seen = new Set();
+  const users = [];
+  for (const user of room.users.values()) {
+    if (seen.has(user.odId)) continue;
+    seen.add(user.odId);
+    users.push(user);
+  }
   io.to(`collab:${roomCode.toUpperCase()}`).emit("collab:users", users);
 }

@@ -8,7 +8,7 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL,
   jwt: {
     secret: process.env.JWT_SECRET || "dev-secret-change-me",
-    accessExpires: process.env.JWT_ACCESS_EXPIRES || "15m",
+    accessExpires: process.env.JWT_ACCESS_EXPIRES || "1h",
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || "7d",
   },
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",

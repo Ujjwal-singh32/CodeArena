@@ -1,7 +1,9 @@
 version: '3.9'
+
 services:
   postgres:
     image: postgres:16
+    container_name: codearena-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -10,6 +12,107 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d codearena"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: codearena-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: codearena-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: codearena-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+
+  sandbox:
+    build:
+      context: ./server/docker/sandbox
+      dockerfile: Dockerfile
+    image: codearena-sandbox:latest
+    container_name: codearena-sandbox
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: docker/Dockerfile
+    container_name: codearena-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    ports:
+      - "5001:5000"
+    environment:
+      PORT: 5000
+      NODE_ENV: development
+      CLIENT_URL: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/codearena
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CLIENT_ID: codearena
+      KAFKA_ENABLED: "true"
+      DOCKER_SANDBOX_IMAGE: codearena-sandbox:latest
+      EXECUTION_ENABLED: "true"
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - ./server/.env
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: codearena-client
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:5001/api/v1
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:5001
+    volumes:
+      - ./client:/app
+      - /app/node_modules
 
 volumes:
   postgres_data:
+  redis_data:

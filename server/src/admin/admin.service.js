@@ -1,6 +1,15 @@
 import prisma from "../config/db.js";
 import { AppError } from "../utils/AppError.js";
 import { getRedis } from "../config/redis.js";
+import { DEFAULT_BOILERPLATES } from "../problems/defaultBoilerplates.js";
+
+const LANG_MAP = {
+  javascript: "JAVASCRIPT",
+  python: "PYTHON",
+  cpp: "CPP",
+  c: "C",
+  java: "JAVA",
+};
 
 export async function createProblem(data) {
   const existing = await prisma.problem.findUnique({ where: { slug: data.slug } });
@@ -25,6 +34,14 @@ export async function createProblem(data) {
     });
     categoryIds.push(cat.id);
   }
+
+  const boilerplateData =
+    data.boilerplates?.length > 0
+      ? data.boilerplates
+      : Object.entries(DEFAULT_BOILERPLATES).map(([lang, starterCode]) => ({
+          language: LANG_MAP[lang] || lang.toUpperCase(),
+          starterCode,
+        }));
 
   const problem = await prisma.problem.create({
     data: {
@@ -54,7 +71,7 @@ export async function createProblem(data) {
         })),
       },
       boilerplates: {
-        create: (data.boilerplates || []).map((b) => ({
+        create: boilerplateData.map((b) => ({
           language: b.language,
           starterCode: b.starterCode,
         })),
@@ -66,6 +83,26 @@ export async function createProblem(data) {
 
   await invalidateProblemCache();
   return problem;
+}
+
+export async function addTestCases(problemId, testCases) {
+  const problem = await prisma.problem.findUnique({ where: { id: problemId } });
+  if (!problem) throw new AppError("Problem not found", 404);
+
+  await prisma.testCase.createMany({
+    data: testCases.map((tc) => ({
+      problemId,
+      input: tc.input,
+      expectedOutput: tc.expectedOutput,
+      isSample: tc.isSample ?? false,
+    })),
+  });
+
+  await invalidateProblemCache();
+  return prisma.problem.findUnique({
+    where: { id: problemId },
+    include: { testCases: true },
+  });
 }
 
 export async function listAllProblems() {

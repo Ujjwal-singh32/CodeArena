@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -21,51 +21,73 @@ import { io } from "socket.io-client";
 import { getSocketUrl, aiApi } from "@/services/api";
 import { cn } from "@/lib/utils";
 
-const defaultMembers = [
-  { id: "1", username: "code_warrior", color: "#00ff88", isOnline: true, isMe: true },
-];
-
 export default function CollabRoomPage() {
   const params = useParams();
   const { user } = useAuth();
   const roomCode = params.code;
   const [language, setLanguage] = useState("javascript");
-  const [members, setMembers] = useState(defaultMembers);
+  const [members, setMembers] = useState([]);
   const [chat, setChat] = useState([
-    { id: "0", sender: "System", message: "Welcome to the collab room!", isSystem: true },
+    { id: "system-0", sender: "System", message: "Welcome to the collab room!", isSystem: true },
   ]);
   const [chatInput, setChatInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [socketReady, setSocketReady] = useState(false);
   const socketRef = useRef(null);
+  const mySocketIdRef = useRef(null);
+  const seenChatIdsRef = useRef(new Set(["system-0"]));
 
-  const userId = user?.username || "guest";
+  const userId = useMemo(
+    () => (user?.id ? String(user.id) : `guest-${roomCode}`),
+    [user?.id, roomCode]
+  );
   const username = user?.username || "guest";
+
+  const addChatMessage = (msg) => {
+    const key = msg.clientMsgId || msg.id;
+    if (key && seenChatIdsRef.current.has(key)) return;
+    if (key) seenChatIdsRef.current.add(key);
+    setChat((prev) => [...prev, msg]);
+  };
 
   useEffect(() => {
     const socket = io(getSocketUrl(), { transports: ["websocket", "polling"] });
     socketRef.current = socket;
 
-    socket.emit("collab:join", { roomCode, userId, username, color: "#00ff88" });
+    socket.on("connect", () => {
+      mySocketIdRef.current = socket.id;
+      setSocketReady(true);
+      socket.emit("collab:join", { roomCode, userId, username, color: "#00ff88" });
+    });
 
     socket.on("collab:users", (users) => {
       setMembers(
         users.map((u) => ({
-          id: u.id,
+          id: u.odId || u.id,
           username: u.name,
           color: u.color,
           isOnline: true,
-          isMe: u.id === userId,
+          isMe: u.odId === userId,
         }))
       );
     });
 
     socket.on("collab:chat", (msg) => {
-      setChat((prev) => [...prev, { id: Date.now().toString(), ...msg }]);
+      if (msg.senderSocketId === mySocketIdRef.current) return;
+      addChatMessage({
+        id: msg.clientMsgId || `${msg.sender}-${Date.now()}`,
+        sender: msg.sender,
+        message: msg.message,
+        isAi: msg.isAi,
+        isMe: false,
+      });
     });
 
     return () => {
       socket.emit("collab:leave", { roomCode, userId });
       socket.disconnect();
+      socketRef.current = null;
+      setSocketReady(false);
     };
   }, [roomCode, userId, username]);
 
@@ -73,21 +95,22 @@ export default function CollabRoomPage() {
     if (!chatInput.trim()) return;
     const message = chatInput.trim();
     const isAiQuery = message.startsWith("@");
+    const clientMsgId = `local-${Date.now()}`;
 
-    const userMsg = {
-      id: Date.now().toString(),
+    addChatMessage({
+      id: clientMsgId,
       sender: username,
       message,
       isMe: true,
-    };
-    setChat((prev) => [...prev, userMsg]);
+    });
     setChatInput("");
 
     socketRef.current?.emit("collab:chat", {
       roomCode,
       sender: username,
       message,
-      isMe: false,
+      senderSocketId: mySocketIdRef.current,
+      clientMsgId,
     });
 
     if (isAiQuery) {
@@ -98,22 +121,29 @@ export default function CollabRoomPage() {
           question: message.slice(1).trim(),
           problemTitle: `Collab Room ${roomCode}`,
         });
-        const aiMsg = {
-          id: (Date.now() + 1).toString(),
+        const aiText = res.response || res.message || "Here's my suggestion for your question.";
+        const aiMsgId = `ai-${Date.now()}`;
+        addChatMessage({
+          id: aiMsgId,
           sender: "AI",
-          message: res.response || res.message || "Here's my suggestion for your question.",
+          message: aiText,
           isAi: true,
-        };
-        setChat((prev) => [...prev, aiMsg]);
-        socketRef.current?.emit("collab:chat", { roomCode, ...aiMsg });
+        });
+        socketRef.current?.emit("collab:chat", {
+          roomCode,
+          sender: "AI",
+          message: aiText,
+          isAi: true,
+          senderSocketId: mySocketIdRef.current,
+          clientMsgId: aiMsgId,
+        });
       } catch {
-        const aiMsg = {
-          id: (Date.now() + 1).toString(),
+        addChatMessage({
+          id: `ai-fallback-${Date.now()}`,
           sender: "AI",
           message: "Try breaking the problem into smaller functions and test each part independently.",
           isAi: true,
-        };
-        setChat((prev) => [...prev, aiMsg]);
+        });
       } finally {
         setAiLoading(false);
       }
@@ -148,7 +178,7 @@ export default function CollabRoomPage() {
           </div>
           <div className="flex items-center gap-1 text-xs text-muted">
             <Users className="w-4 h-4" />
-            {members.filter((m) => m.isOnline).length}/{members.length}
+            {members.filter((m) => m.isOnline).length}/{Math.max(members.length, 1)}
           </div>
         </div>
       </div>
@@ -163,7 +193,7 @@ export default function CollabRoomPage() {
                   className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-background"
                   style={{ backgroundColor: m.color }}
                 >
-                  {m.username[0].toUpperCase()}
+                  {m.username[0]?.toUpperCase() || "?"}
                 </div>
                 <div>
                   <p className={`text-xs font-medium ${m.isMe ? "text-primary" : "text-foreground"}`}>
@@ -190,12 +220,15 @@ export default function CollabRoomPage() {
             </Button>
           </div>
           <div className="flex-1 min-h-0">
-            <CollabEditor
-              roomCode={roomCode}
-              language={language}
-              username={username}
-              userId={userId}
-            />
+            {socketReady && socketRef.current && (
+              <CollabEditor
+                socket={socketRef.current}
+                roomCode={roomCode}
+                language={language}
+                username={username}
+                userId={userId}
+              />
+            )}
           </div>
         </div>
 

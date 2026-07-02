@@ -38,6 +38,23 @@ app.post("/api/upload", express.json({ limit: "2mb" }), async (req, res) => {
   }
 });
 
+app.post("/api/problems/:id/test-cases", express.json({ limit: "2mb" }), async (req, res) => {
+  try {
+    const response = await fetch(`${API_URL}/admin/problems/${req.params.id}/test-cases`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Key": ADMIN_API_KEY,
+      },
+      body: JSON.stringify(req.body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/problems", async (_req, res) => {
   try {
     const response = await fetch(`${API_URL}/admin/problems`, {

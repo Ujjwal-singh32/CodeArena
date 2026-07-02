@@ -2,7 +2,8 @@ import * as duelService from "./duel.service.js";
 import { AppError } from "../utils/AppError.js";
 
 function getUserId(req) {
-  return req.user?.id || 1;
+  if (!req.user?.id) throw new AppError("Authentication required", 401);
+  return req.user.id;
 }
 
 export async function create(req, res, next) {
@@ -51,6 +52,19 @@ export async function get(req, res, next) {
 export async function start(req, res, next) {
   try {
     const match = await duelService.lockAndStartMatch(parseInt(req.params.id, 10));
+    res.json({ match });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function submitConfig(req, res, next) {
+  try {
+    const match = await duelService.submitMatchConfig(
+      parseInt(req.params.id, 10),
+      getUserId(req),
+      req.body
+    );
     res.json({ match });
   } catch (err) {
     next(err);

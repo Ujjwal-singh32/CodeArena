@@ -33,7 +33,7 @@ const problemSchema = z.object({
         isSample: z.boolean().optional(),
       })
     )
-    .min(1),
+    .optional(),
   boilerplates: z
     .array(
       z.object({
@@ -62,6 +62,32 @@ export async function listProblems(_req, res, next) {
     const problems = await adminService.listAllProblems();
     res.json({ problems });
   } catch (err) {
+    next(err);
+  }
+}
+
+const testCaseSchema = z.object({
+  testCases: z
+    .array(
+      z.object({
+        input: z.string(),
+        expectedOutput: z.string(),
+        isSample: z.boolean().optional(),
+      })
+    )
+    .min(1),
+});
+
+export async function addTestCases(req, res, next) {
+  try {
+    const problemId = parseInt(req.params.id, 10);
+    const data = testCaseSchema.parse(req.body);
+    const problem = await adminService.addTestCases(problemId, data.testCases);
+    res.status(201).json({ message: "Test cases added", problem });
+  } catch (err) {
+    if (err.name === "ZodError") {
+      return next(new AppError(err.errors[0]?.message || "Validation error", 400));
+    }
     next(err);
   }
 }

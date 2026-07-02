@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -15,17 +15,28 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
-import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import CodeEditor from "@/components/editor/CodeEditor";
 import OutputConsole from "@/components/editor/OutputConsole";
-import { LANGUAGES, duelApi } from "@/services/api";
+import {
+  LANGUAGES,
+  duelApi,
+  submissionsApi,
+  mapVerdictStatus,
+  pollSubmission,
+  formatVerdictOutput,
+} from "@/services/api";
+import { useDuelSocket } from "@/hooks/useSocket";
 import { formatTime } from "@/lib/utils";
 import { useParams } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 
 export default function DuelRoomPage() {
   const params = useParams();
+  const { user } = useAuth();
   const matchId = params.id;
+
+  const [match, setMatch] = useState(null);
   const [phase, setPhase] = useState("config");
   const [timer, setTimer] = useState(900);
   const [chat, setChat] = useState([]);
@@ -37,84 +48,275 @@ export default function DuelRoomPage() {
     duration: "15",
   });
   const [myReady, setMyReady] = useState(false);
-  const [opponentReady, setOpponentReady] = useState(false);
+  const [readyPlayers, setReadyPlayers] = useState(new Set());
   const [code, setCode] = useState("// Write your solution here\n");
   const [language, setLanguage] = useState("javascript");
   const [output, setOutput] = useState("");
   const [outputStatus, setOutputStatus] = useState("idle");
-  const [match, setMatch] = useState(null);
+  const [running, setRunning] = useState(false);
 
-  useEffect(() => {
+  const applyMatch = useCallback((m) => {
+    if (!m) return;
+    setMatch(m);
+    if (m.config) {
+      setConfig({
+        topic: m.config.topic || "Arrays",
+        difficulty: m.config.difficulty || "MEDIUM",
+        questionCount: String(m.config.questionCount || 1),
+        duration: String(m.config.duration || 15),
+      });
+      if (m.config.isLocked) {
+        setMyReady(true);
+        setReadyPlayers(new Set(m.participants?.map((p) => p.id) || []));
+      }
+    }
+    if (m.chat?.length) {
+      setChat((prev) => {
+        const byId = new Map();
+        for (const msg of m.chat) {
+          byId.set(String(msg.id), {
+            ...msg,
+            isMe: String(msg.senderId) === String(user?.id),
+          });
+        }
+        for (const msg of prev) {
+          const key = String(msg.id);
+          if (!byId.has(key)) byId.set(key, msg);
+        }
+        return Array.from(byId.values());
+      });
+    }
+    if (m.status === "RUNNING") {
+      setPhase("coding");
+      const durationSec = (m.config?.duration || 15) * 60;
+      if (m.startedAt) {
+        const elapsed = Math.floor((Date.now() - new Date(m.startedAt).getTime()) / 1000);
+        setTimer(Math.max(0, durationSec - elapsed));
+      } else {
+        setTimer(durationSec);
+      }
+    } else if (m.status === "FINISHED") {
+      setPhase("finished");
+    }
+  }, [user?.id]);
+
+  const loadMatch = useCallback(async () => {
     if (!matchId || String(matchId).startsWith("game-")) return;
-    duelApi
-      .get(matchId)
-      .then((res) => setMatch(res.match || res))
-      .catch(() => {});
-  }, [matchId]);
+    try {
+      const res = await duelApi.get(matchId);
+      applyMatch(res.match || res);
+    } catch {
+      // keep current state
+    }
+  }, [matchId, applyMatch]);
 
   useEffect(() => {
-    if (phase !== "coding") return;
+    loadMatch();
+    const interval = setInterval(loadMatch, 3000);
+    return () => clearInterval(interval);
+  }, [loadMatch]);
+
+  const seenChatIdsRef = useRef(new Set());
+
+  const duelHandlers = useRef({});
+  duelHandlers.current = {
+    "duel:chat": (msg) => {
+      const key = msg.clientMsgId || msg.id;
+      if (key && seenChatIdsRef.current.has(key)) return;
+      if (key) seenChatIdsRef.current.add(key);
+      setChat((prev) => {
+        if (msg.id && prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, { ...msg, isMe: String(msg.senderId) === String(user?.id) }];
+      });
+    },
+    "duel:match-update": ({ match: m }) => applyMatch(m),
+    "duel:started": ({ match: m }) => {
+      if (m) applyMatch(m);
+      else loadMatch();
+    },
+    "duel:player-ready": ({ userId }) => {
+      setReadyPlayers((prev) => new Set([...prev, userId]));
+    },
+    "duel:finished": ({ match: m }) => {
+      if (m) applyMatch(m);
+      else loadMatch();
+    },
+  };
+
+  const socketRef = useDuelSocket(matchId, user?.id, duelHandlers.current);
+
+  useEffect(() => {
+    if (phase === "coding" && problem?.slug) {
+      import("@/services/api").then(({ problemsApi }) => {
+        problemsApi.getBySlug(problem.slug).then((res) => {
+          const p = res.problem || res;
+          const langs = Object.keys(p.boilerplate || {});
+          const defaultLang = langs.includes("javascript") ? "javascript" : langs[0] || "javascript";
+          setLanguage(defaultLang);
+          setCode(p.boilerplate?.[defaultLang] || code);
+        }).catch(() => {});
+      });
+    }
+  }, [phase, problem?.slug]);
+
+  useEffect(() => {
+    if (phase !== "coding" || timer <= 0) return;
     const interval = setInterval(() => {
       setTimer((t) => (t > 0 ? t - 1 : 0));
     }, 1000);
     return () => clearInterval(interval);
-  }, [phase]);
+  }, [phase, timer]);
 
-  const handleSubmitConfig = () => {
-    setMyReady(true);
-    setTimeout(() => setOpponentReady(true), 1500);
-    setTimeout(() => {
-      setPhase("coding");
-      setChat((prev) => [
-        ...prev,
-        { id: Date.now().toString(), sender: "System", message: "Match started! Good luck!", time: "14:35" },
-      ]);
-    }, 2500);
+  const handleSubmitConfig = async () => {
+    if (!matchId) return;
+    try {
+      const res = await duelApi.submitConfig(matchId, config);
+      setMyReady(true);
+      setReadyPlayers((prev) => new Set([...prev, user?.id]));
+      applyMatch(res.match || res);
+    } catch (error) {
+      setOutput(error.message || "Failed to submit config");
+      setOutputStatus("error");
+    }
   };
 
   const sendChat = () => {
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || !user?.id) return;
+    const message = chatInput.trim();
+    const clientMsgId = `local-${Date.now()}`;
+    setChatInput("");
+    seenChatIdsRef.current.add(clientMsgId);
     setChat((prev) => [
       ...prev,
-      { id: Date.now().toString(), sender: "code_warrior", message: chatInput, time: "now", isMe: true },
+      {
+        id: clientMsgId,
+        sender: user.username,
+        senderId: user.id,
+        message,
+        isMe: true,
+      },
     ]);
-    setChatInput("");
+    socketRef.current?.emit("duel:chat", {
+      matchId,
+      message,
+      senderId: user.id,
+      clientMsgId,
+    });
   };
 
-  const handleSubmit = () => {
+  const handleRun = async () => {
+    const problemId = match?.config?.problem?.id || match?.config?.problemId;
+    if (!problemId) {
+      setOutput("Problem not loaded yet.");
+      setOutputStatus("error");
+      return;
+    }
+    setRunning(true);
     setOutputStatus("running");
-    setOutput("Judging submission...");
-    setTimeout(() => {
-      setOutput("Accepted! You win!");
-      setOutputStatus("success");
-    }, 2000);
+    setOutput("Running against sample test cases...");
+    try {
+      const result = await submissionsApi.run({
+        code,
+        language,
+        problemId: parseInt(problemId, 10),
+      });
+      setOutput(result.output || "No output");
+      setOutputStatus(
+        result.status === "ACCEPTED"
+          ? "success"
+          : result.status === "WRONG_ANSWER"
+            ? "wrong"
+            : "error"
+      );
+    } catch (error) {
+      setOutput(error.message || "Run failed");
+      setOutputStatus("error");
+    } finally {
+      setRunning(false);
+    }
   };
 
+  const handleSubmit = async () => {
+    const problemId = match?.config?.problem?.id || match?.config?.problemId;
+    if (!problemId) {
+      setOutput("Problem not loaded yet.");
+      setOutputStatus("error");
+      return;
+    }
+    setRunning(true);
+    setOutputStatus("running");
+    setOutput("Submitting to judge...");
+    try {
+      const result = await submissionsApi.submit({
+        code,
+        language,
+        problemId: parseInt(problemId, 10),
+        matchId: parseInt(matchId, 10),
+      });
+      const v = result.verdict;
+      if (v) {
+        setOutput(formatVerdictOutput(v));
+        setOutputStatus(mapVerdictStatus(v.status));
+        if (v.status === "ACCEPTED") {
+          socketRef.current?.emit("duel:submit-win", {
+            matchId,
+            winnerId: user?.id,
+          });
+        }
+      } else if (result.submission?.id) {
+        const submission = await pollSubmission(result.submission.id);
+        if (submission) {
+          setOutput(formatVerdictOutput(submission));
+          setOutputStatus(mapVerdictStatus(submission.status));
+          if (submission.status === "ACCEPTED") {
+            socketRef.current?.emit("duel:submit-win", {
+              matchId,
+              winnerId: user?.id,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      setOutput(error.message || "Submission failed");
+      setOutputStatus("error");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const participants = match?.participants || [];
+  const me = participants.find((p) => p.id === user?.id);
+  const opponent = participants.find((p) => p.id !== user?.id);
+  const opponentReady = opponent ? readyPlayers.has(opponent.id) : false;
   const isLocked = myReady && opponentReady;
+  const problem = match?.config?.problem;
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass flex-shrink-0">
         <div className="flex items-center gap-3">
           <Link href="/duel" className="text-muted hover:text-primary transition-colors">
             <ChevronLeft className="w-5 h-5" />
           </Link>
           <Swords className="w-5 h-5 text-primary" />
-          <span className="text-sm font-semibold">Duel Room</span>
-          <Badge variant="ACTIVE">LIVE</Badge>
+          <span className="text-sm font-semibold">Duel Room #{matchId}</span>
+          <Badge variant="ACTIVE">{match?.status || "WAITING"}</Badge>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 text-sm">
             <User className="w-4 h-4 text-primary" />
-            <span>code_warrior</span>
+            <span>{me?.username || user?.username || "You"}</span>
             <span className="text-muted">vs</span>
-            <span>algo_master</span>
+            <span>{opponent?.username || "Waiting..."}</span>
             <User className="w-4 h-4 text-danger" />
           </div>
           {phase === "coding" && (
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-lg border ${timer < 60 ? "border-danger/50 text-danger" : "border-primary/30 text-primary"}`}>
+            <div
+              className={`flex items-center gap-2 px-3 py-1 rounded-lg border ${
+                timer < 60 ? "border-danger/50 text-danger" : "border-primary/30 text-primary"
+              }`}
+            >
               <Clock className="w-4 h-4" />
               <span className="font-mono font-bold">{formatTime(timer)}</span>
             </div>
@@ -123,7 +325,6 @@ export default function DuelRoomPage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left panel — Config or Problem */}
         <div className="w-[350px] border-r border-border flex flex-col flex-shrink-0">
           {phase === "config" ? (
             <div className="p-4 flex-1 overflow-y-auto scrollbar-thin">
@@ -187,11 +388,11 @@ export default function DuelRoomPage() {
                   </div>
                   <div className={`flex items-center gap-2 text-xs ${opponentReady ? "text-primary" : "text-muted"}`}>
                     <div className={`w-2 h-2 rounded-full ${opponentReady ? "bg-primary" : "bg-border"}`} />
-                    Opponent {opponentReady ? "ready" : "configuring"}
+                    Opponent {opponentReady ? "ready" : participants.length < 2 ? "not joined" : "configuring"}
                   </div>
                 </div>
 
-                {!myReady && (
+                {!myReady && participants.length >= 2 && (
                   <Button className="w-full" onClick={handleSubmitConfig}>
                     Submit Configuration
                   </Button>
@@ -199,23 +400,33 @@ export default function DuelRoomPage() {
                 {myReady && !opponentReady && (
                   <p className="text-xs text-muted text-center">Waiting for opponent to confirm...</p>
                 )}
+                {participants.length < 2 && (
+                  <p className="text-xs text-muted text-center">Waiting for opponent to join...</p>
+                )}
               </div>
             </div>
           ) : (
             <div className="p-4 flex-1 overflow-y-auto scrollbar-thin">
-              <h3 className="text-sm font-semibold mb-2">
-                {match?.config?.topic || config.topic} Challenge
-              </h3>
-              <Badge variant={match?.config?.difficulty || config.difficulty} className="mb-4">
-                {match?.config?.difficulty || config.difficulty}
+              <h3 className="text-sm font-semibold mb-2">{problem?.title || "Challenge"}</h3>
+              <Badge variant={problem?.difficulty || config.difficulty} className="mb-4">
+                {problem?.difficulty || config.difficulty}
               </Badge>
-              <div className="text-sm text-muted leading-relaxed">
-                <p>Solve the assigned problem before your opponent. Problem details load when the match starts.</p>
-              </div>
+              {problem ? (
+                <div className="text-sm text-muted leading-relaxed space-y-3">
+                  {problem.statement?.split("\n").map((line, i) => (
+                    <p key={i}>{line.replace(/\*\*(.*?)\*\*/g, "$1")}</p>
+                  ))}
+                  <h4 className="text-xs font-semibold text-foreground">Input</h4>
+                  <pre className="text-xs font-mono whitespace-pre-wrap">{problem.inputFormat}</pre>
+                  <h4 className="text-xs font-semibold text-foreground">Output</h4>
+                  <pre className="text-xs font-mono whitespace-pre-wrap">{problem.outputFormat}</pre>
+                </div>
+              ) : (
+                <p className="text-sm text-muted">Loading problem...</p>
+              )}
             </div>
           )}
 
-          {/* Chat */}
           <div className="border-t border-border flex flex-col h-[250px]">
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
               <MessageSquare className="w-4 h-4 text-muted" />
@@ -244,18 +455,13 @@ export default function DuelRoomPage() {
           </div>
         </div>
 
-        {/* Right — Editor */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {phase === "config" ? (
             <div className="flex-1 flex items-center justify-center text-muted">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center"
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
                 <Swords className="w-16 h-16 mx-auto mb-4 text-border" />
                 <p className="text-lg font-medium mb-2">Waiting for match setup</p>
-                <p className="text-sm">Configure your preferences and submit to start</p>
+                <p className="text-sm">Both players must submit configuration to start</p>
               </motion.div>
             </div>
           ) : (
@@ -268,10 +474,10 @@ export default function DuelRoomPage() {
                   className="w-40"
                 />
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm">
+                  <Button variant="secondary" size="sm" onClick={handleRun} disabled={running}>
                     <Play className="w-4 h-4" /> Run
                   </Button>
-                  <Button size="sm" onClick={handleSubmit}>
+                  <Button size="sm" onClick={handleSubmit} disabled={running}>
                     <Send className="w-4 h-4" /> Submit
                   </Button>
                 </div>

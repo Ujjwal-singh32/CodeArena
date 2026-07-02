@@ -1,6 +1,7 @@
 import prisma from "../config/db.js";
 import { getRedis } from "../config/redis.js";
 import { AppError } from "../utils/AppError.js";
+import { DEFAULT_BOILERPLATES, ALL_CLIENT_LANGUAGES } from "./defaultBoilerplates.js";
 
 const CACHE_TTL = 300;
 
@@ -107,6 +108,11 @@ function formatProblemDetail(p) {
   const boilerplate = {};
   for (const b of p.boilerplates) {
     boilerplate[langToClient(b.language)] = b.starterCode;
+  }
+  for (const lang of ALL_CLIENT_LANGUAGES) {
+    if (!boilerplate[lang]) {
+      boilerplate[lang] = DEFAULT_BOILERPLATES[lang];
+    }
   }
 
   return {
