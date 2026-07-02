@@ -157,7 +157,7 @@ export default function CollabRoomPage() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass shrink-0">
         <div className="flex items-center gap-3">
           <Link href="/collab" className="text-muted hover:text-primary transition-colors">
             <ChevronLeft className="w-5 h-5" />
@@ -185,7 +185,7 @@ export default function CollabRoomPage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden min-h-0">
-        <div className="w-[200px] border-r border-border p-4 flex-shrink-0 hidden md:block overflow-y-auto">
+        <div className="w-50 border-r border-border p-4 shrink-0 hidden md:block overflow-y-auto">
           <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Online</h4>
           <div className="space-y-3">
             {members.map((m) => (
@@ -208,7 +208,7 @@ export default function CollabRoomPage() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card shrink-0">
             <Select
               options={LANGUAGES}
               value={language}
@@ -233,7 +233,7 @@ export default function CollabRoomPage() {
           </div>
         </div>
 
-        <div className="w-[320px] border-l border-border flex flex-col flex-shrink-0 hidden lg:flex">
+        <div className="w-[320px] border-l border-border flex flex-col shrink-0 hidden lg:flex">
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
             <MessageSquare className="w-4 h-4 text-muted" />
             <span className="text-xs font-medium">Chat</span>

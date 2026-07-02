@@ -83,15 +83,10 @@
       </div>
       <label>Explanation</label>
       <input id="ex1-exp" />
-      <h3>Sample Test Cases (included with problem)</h3>
-      <div class="tc-row">
-        <label>Test 1 Input</label><textarea id="tc1-in" rows="2"></textarea>
-        <label>Expected Output</label><textarea id="tc1-out" rows="2"></textarea>
-      </div>
-      <div class="tc-row">
-        <label>Test 2 Input</label><textarea id="tc2-in" rows="2"></textarea>
-        <label>Expected Output</label><textarea id="tc2-out" rows="2"></textarea>
-      </div>
+      <h3>Test Cases for this Problem</h3>
+      <p class="sub" style="margin-bottom:1rem">Add as many cases as you want. They will be uploaded together with the problem in one request and run in a single Judge0 batch.</p>
+      <div id="problem-tc-container"></div>
+      <button type="button" class="secondary" id="addProblemTcRow" style="margin-bottom:1rem">+ Add Test Case</button>
       <button type="button" id="createProblem">Create Problem</button>
       <div id="msg-problem"></div>
     </div>
@@ -142,6 +137,21 @@
       return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
     }
 
+    function addProblemTcRow() {
+      const container = document.getElementById("problem-tc-container");
+      const div = document.createElement("div");
+      div.className = "tc-row";
+      div.innerHTML = `
+        <label>Input</label><textarea class="tc-in" rows="2"></textarea>
+        <label>Expected Output</label><textarea class="tc-out" rows="2"></textarea>
+        <label><input type="checkbox" class="tc-sample" checked /> Sample case</label>
+      `;
+      container.appendChild(div);
+    }
+
+    document.getElementById("addProblemTcRow").onclick = addProblemTcRow;
+    addProblemTcRow();
+
     document.getElementById("p-title").addEventListener("input", (e) => {
       const slug = document.getElementById("p-slug");
       if (!slug.dataset.manual) slug.value = slugify(e.target.value);
@@ -152,6 +162,16 @@
 
     document.getElementById("createProblem").onclick = async () => {
       const el = document.getElementById("msg-problem");
+      const testCases = [];
+      document.querySelectorAll("#problem-tc-container .tc-row").forEach((row) => {
+        const input = row.querySelector(".tc-in").value;
+        const expectedOutput = row.querySelector(".tc-out").value;
+        const isSample = row.querySelector(".tc-sample").checked;
+        if (input && expectedOutput) {
+          testCases.push({ input, expectedOutput, isSample });
+        }
+      });
+
       const body = {
         title: document.getElementById("p-title").value.trim(),
         slug: document.getElementById("p-slug").value.trim(),
@@ -169,11 +189,8 @@
           input: document.getElementById("ex1-in").value,
           output: document.getElementById("ex1-out").value,
           explanation: document.getElementById("ex1-exp").value || undefined,
-        }],
-        testCases: [
-          { input: document.getElementById("tc1-in").value, expectedOutput: document.getElementById("tc1-out").value, isSample: true },
-          { input: document.getElementById("tc2-in").value, expectedOutput: document.getElementById("tc2-out").value, isSample: true },
-        ].filter((tc) => tc.input && tc.expectedOutput),
+        }].filter((ex) => ex.input || ex.output),
+        testCases,
       };
       try {
         const res = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
