@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+ARG DATABASE_URL=postgresql://postgres:postgres@postgres:5432/codearena
+ENV DATABASE_URL=$DATABASE_URL
+
 RUN apk add --no-cache docker-cli
 
 WORKDIR /app
