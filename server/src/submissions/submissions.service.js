@@ -4,6 +4,14 @@ import { clientToPrismaLang } from "../problems/problems.service.js";
 import { judgeSubmission } from "../execution/sandbox.js";
 import { addExecutionJob, addAiReviewJob } from "../queues/index.js";
 import { publishEvent } from "../config/kafka.js";
+import { formatJudgeOutput } from "../utils/judgeOutput.js";
+
+function formatVerdict(verdict) {
+  return {
+    ...verdict,
+    output: formatJudgeOutput(verdict.status, verdict),
+  };
+}
 
 export async function runSampleTests({ userId, problemId, code, language }) {
   const problem = await prisma.problem.findUnique({
@@ -23,10 +31,14 @@ export async function runSampleTests({ userId, problemId, code, language }) {
     memoryLimitMb: problem.memoryLimit,
   });
 
-  const output =
-    result.status === "WRONG_ANSWER"
-      ? `Wrong Answer\nYour output:\n${result.stdout || "(empty)"}\nExpected:\n${result.expectedOutput || ""}`
-      : result.stdout || result.stderr || result.compileOutput || "";
+  const output = formatJudgeOutput(result.status, {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    compileOutput: result.compileOutput,
+    passedTestCases: result.passedTestCases,
+    totalTestCases: result.totalTestCases,
+    expectedOutput: result.expectedOutput,
+  });
 
   return {
     output,
@@ -70,9 +82,10 @@ export async function createSubmission({ userId, problemId, code, language, matc
   });
 
   if (jobResult.inline) {
+    const verdict = jobResult.result?.verdict || jobResult.result;
     return {
       submission: jobResult.result?.submission || submission,
-      verdict: jobResult.result?.verdict || jobResult.result,
+      verdict: verdict ? formatVerdict(verdict) : null,
     };
   }
 
@@ -126,7 +139,7 @@ export async function processSubmissionJob(data) {
     await addAiReviewJob({ submissionId });
   }
 
-  return { submission, verdict };
+  return { submission, verdict: formatVerdict(verdict) };
 }
 
 export async function getSubmission(id, userId) {

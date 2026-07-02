@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 import prisma from "../config/db.js";
 import { AppError } from "../utils/AppError.js";
-import { signAccessToken, signRefreshToken, parseExpiresToMs } from "../utils/jwt.js";
+import { signAccessToken, signRefreshToken, parseExpiresToMs, verifyToken } from "../utils/jwt.js";
 import { sendVerificationEmail } from "../utils/email.js";
 import { env } from "../config/env.js";
 
@@ -109,4 +109,36 @@ export async function getMe(userId) {
   if (!user) throw new AppError("User not found", 404);
   const { passwordHash, ...safe } = user;
   return safe;
+}
+
+export async function refreshAccessToken(refreshToken) {
+  let decoded;
+  try {
+    decoded = verifyToken(refreshToken);
+  } catch {
+    throw new AppError("Invalid refresh token", 401);
+  }
+
+  const stored = await prisma.refreshToken.findFirst({
+    where: { token: refreshToken, userId: decoded.userId, revoked: false },
+  });
+  if (!stored || stored.expiresAt < new Date()) {
+    throw new AppError("Refresh token expired", 401);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: decoded.userId },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      emailVerified: true,
+      rating: true,
+      solvedCount: true,
+    },
+  });
+  if (!user) throw new AppError("User not found", 404);
+
+  const accessToken = signAccessToken({ userId: user.id });
+  return { accessToken, user };
 }

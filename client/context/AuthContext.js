@@ -20,9 +20,29 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const silentRefresh = useCallback(async () => {
+    try {
+      const res = await authApi.refresh();
+      if (res.user) setUser(res.user);
+    } catch {
+      // Keep current session until explicit logout or /me fails
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    const interval = setInterval(silentRefresh, 5 * 60 * 1000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") silentRefresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh, silentRefresh]);
 
   const logout = async () => {
     try {

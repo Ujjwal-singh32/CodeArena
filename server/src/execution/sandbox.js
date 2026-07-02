@@ -52,9 +52,24 @@ function getLangConfig(language) {
 
 export async function executeCode({ code, language, input, timeLimitSec = 2, memoryLimitMb = 256 }) {
   if (env.execution.enabled) {
-    return executeInDocker({ code, language, input, timeLimitSec, memoryLimitMb });
+    const dockerResult = await executeInDocker({ code, language, input, timeLimitSec, memoryLimitMb });
+    if (isDockerUnavailable(dockerResult)) {
+      return executeLocally({ code, language, input, timeLimitSec });
+    }
+    return dockerResult;
   }
   return executeLocally({ code, language, input, timeLimitSec });
+}
+
+function isDockerUnavailable(result) {
+  const err = `${result.stderr || ""}${result.stdout || ""}`.toLowerCase();
+  return (
+    err.includes("docker") &&
+    (err.includes("cannot find the file") ||
+      err.includes("failed to connect") ||
+      err.includes("not found") ||
+      err.includes("daemon"))
+  );
 }
 
 async function executeLocally({ code, language, input, timeLimitSec }) {
@@ -81,7 +96,7 @@ async function executeLocally({ code, language, input, timeLimitSec }) {
     }
 
     const start = Date.now();
-    const result = await runProcess(config.localRun, workDir, "", timeLimitSec * 1000);
+    const result = await runProcess(config.localRun, workDir, input || "", timeLimitSec * 1000);
     const runtime = Date.now() - start;
 
     if (result.timedOut) {

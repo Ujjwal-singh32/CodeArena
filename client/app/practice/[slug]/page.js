@@ -1,9 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { problemsApi, submissionsApi, LANGUAGES } from "@/services/api";
+import {
+  problemsApi,
+  submissionsApi,
+  LANGUAGES,
+  mapVerdictStatus,
+  pollSubmission,
+  formatVerdictOutput,
+} from "@/services/api";
+import { useSocket } from "@/hooks/useSocket";
 import { motion } from "framer-motion";
 import {
   ChevronLeft,
@@ -41,6 +49,27 @@ export default function ProblemPage() {
   const [showAI, setShowAI] = useState(false);
   const [showOutput, setShowOutput] = useState(true);
   const [running, setRunning] = useState(false);
+  const pendingSubmissionRef = useRef(null);
+
+  const applyVerdict = useCallback((v) => {
+    setOutput(formatVerdictOutput(v));
+    setOutputStatus(mapVerdictStatus(v.status));
+    setRuntime(v.runtime ? `${v.runtime} ms` : null);
+    setMemory(v.memory ? `${v.memory} MB` : null);
+    setRunning(false);
+    pendingSubmissionRef.current = null;
+  }, []);
+
+  useSocket(user?.id, {
+    "submission:verdict": (payload) => {
+      if (
+        pendingSubmissionRef.current &&
+        String(payload.submissionId) === String(pendingSubmissionRef.current)
+      ) {
+        applyVerdict(payload);
+      }
+    },
+  });
 
   useEffect(() => {
     if (!slug) return;
@@ -93,13 +122,14 @@ export default function ProblemPage() {
         language,
         problemId: parseInt(problem.id, 10),
       });
-      const statusLabel = result.status?.replace(/_/g, " ") || "Done";
-      const detail =
-        result.passedTestCases != null
-          ? `\n${result.passedTestCases}/${result.totalTestCases} sample tests passed`
-          : "";
-      setOutput(`${statusLabel}${detail}\n\n${result.output || "No output"}`);
-      setOutputStatus(result.status === "ACCEPTED" ? "success" : "error");
+      setOutput(result.output || "No output");
+      setOutputStatus(
+        result.status === "ACCEPTED"
+          ? "success"
+          : result.status === "WRONG_ANSWER"
+            ? "wrong"
+            : "error"
+      );
       setRuntime(result.runtime ? `${result.runtime} ms` : null);
       setMemory(result.memory ? `${result.memory} MB` : null);
     } catch (error) {
@@ -124,19 +154,35 @@ export default function ProblemPage() {
       });
       const v = result.verdict;
       if (v) {
-        const msg = `${v.status.replace(/_/g, " ")} — ${v.passedTestCases}/${v.totalTestCases} tests passed`;
-        setOutput(msg);
-        setOutputStatus(v.status === "ACCEPTED" ? "success" : "error");
-        setRuntime(v.runtime ? `${v.runtime} ms` : null);
-      } else {
-        setOutput(`Submission queued (ID: ${result.submission?.id}). Waiting for verdict...`);
+        applyVerdict(v);
+      } else if (result.submission?.id) {
+        pendingSubmissionRef.current = result.submission.id;
+        setOutput(`Submission queued (ID: ${result.submission.id}). Waiting for verdict...`);
         setOutputStatus("running");
+        setRunning(true);
+        const submission = await pollSubmission(result.submission.id);
+        if (submission) {
+          applyVerdict({
+            status: submission.status,
+            passedTestCases: submission.passedTestCases,
+            totalTestCases: submission.totalTestCases,
+            runtime: submission.runtime,
+            memory: submission.memory,
+            compileOutput: submission.compileOutput,
+            stderr: submission.stderr,
+            stdout: submission.stdout,
+          });
+        } else {
+          setOutput("Verdict timed out. Check submission history.");
+          setOutputStatus("error");
+          setRunning(false);
+        }
       }
     } catch (error) {
       setOutput(error.message || "Submission failed");
       setOutputStatus("error");
     } finally {
-      setRunning(false);
+      if (!pendingSubmissionRef.current) setRunning(false);
     }
   };
 
@@ -158,10 +204,7 @@ export default function ProblemPage() {
   }
 
   const diff = formatDifficulty(problem.difficulty);
-  const availableLangs = LANGUAGES.filter(
-    (l) => problem.boilerplate?.[l.value] !== undefined
-  );
-  const langOptions = availableLangs.length > 0 ? availableLangs : LANGUAGES;
+  const langOptions = LANGUAGES;
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">

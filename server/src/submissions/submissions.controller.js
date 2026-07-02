@@ -44,6 +44,7 @@ export async function submit(req, res, next) {
             totalTestCases: verdict.totalTestCases,
             runtime: verdict.runtime,
             memory: verdict.memory,
+            output: verdict.output,
           }
         : null,
       jobId: result.jobId || null,

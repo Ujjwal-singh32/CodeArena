@@ -4,6 +4,7 @@ import app from "./app.js";
 import { env } from "./config/env.js";
 import { connectRedis } from "./config/redis.js";
 import { setupSockets } from "./sockets/index.js";
+import { setIo } from "./sockets/io.js";
 import { startWorkers } from "./workers/index.js";
 
 const httpServer = createServer(app);
@@ -15,11 +16,12 @@ const io = new Server(httpServer, {
   },
 });
 
+setIo(io);
 setupSockets(io);
-startWorkers(io);
 
 async function bootstrap() {
   await connectRedis();
+  startWorkers(io);
 
   httpServer.listen(env.port, () => {
     console.log(`CodeArena API v1 running on port ${env.port}`);

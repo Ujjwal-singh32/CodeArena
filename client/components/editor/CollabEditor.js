@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import * as Y from "yjs";
 import { MonacoBinding } from "y-monaco";
 import { Awareness } from "y-protocols/awareness";
-import { io } from "socket.io-client";
-import { getSocketUrl } from "@/services/api";
 import { cn } from "@/lib/utils";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
@@ -16,6 +14,7 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
 const USER_COLORS = ["#00ff88", "#ff6b6b", "#4ecdc4", "#ffe66d", "#a78bfa"];
 
 export default function CollabEditor({
+  socket,
   roomCode,
   language = "javascript",
   username = "guest",
@@ -26,9 +25,10 @@ export default function CollabEditor({
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const bindingRef = useRef(null);
+  const cleanupRef = useRef(null);
   const [editorHeight, setEditorHeight] = useState(400);
-  const [onlineUsers, setOnlineUsers] = useState([]);
   const [remoteCursors, setRemoteCursors] = useState([]);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -43,52 +43,55 @@ export default function CollabEditor({
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!editorRef.current || !monacoRef.current) return;
+  const setupCollab = useCallback(() => {
+    if (!editorRef.current || !monacoRef.current || !roomCode || !socket) return;
+
+    cleanupRef.current?.();
 
     const ydoc = new Y.Doc();
     const ytext = ydoc.getText("monaco");
     const awareness = new Awareness(ydoc);
-    const color = USER_COLORS[Math.abs(userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % USER_COLORS.length];
+    const color =
+      USER_COLORS[
+        Math.abs(String(userId).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) %
+          USER_COLORS.length
+      ];
 
-    awareness.setLocalStateField("user", { name: username, color, id: userId });
+    awareness.setLocalStateField("user", { name: username, color, id: String(userId) });
 
-    const socket = io(getSocketUrl(), { transports: ["websocket", "polling"] });
-
-    socket.emit("collab:join", { roomCode, userId, username, color });
-
-    socket.on("collab:sync", ({ update }) => {
+    const onSync = ({ update }) => {
       if (update) Y.applyUpdate(ydoc, new Uint8Array(update));
-    });
+    };
+    socket.on("collab:sync", onSync);
 
-    ydoc.on("update", (update) => {
+    const onDocUpdate = (update) => {
       socket.emit("collab:update", { roomCode, update: Array.from(update) });
-    });
+    };
+    ydoc.on("update", onDocUpdate);
 
-    awareness.on("change", () => {
+    const onAwarenessChange = () => {
       const states = [];
       awareness.getStates().forEach((state, clientId) => {
         if (clientId === awareness.clientID) return;
         if (state?.user) states.push({ clientId, ...state.user, cursor: state.cursor });
       });
       setRemoteCursors(states);
-    });
+    };
+    awareness.on("change", onAwarenessChange);
 
-    socket.on("collab:awareness", ({ update }) => {
+    const onRemoteAwareness = ({ update }) => {
       if (update) awareness.applyUpdate(new Uint8Array(update));
-    });
+    };
+    socket.on("collab:awareness", onRemoteAwareness);
 
-    awareness.on("update", ({ added, updated, removed }) => {
+    const onAwarenessUpdate = ({ added, updated, removed }) => {
       const changed = added.concat(updated, removed);
       if (changed.length) {
         const update = awareness.encodeUpdate(changed);
         socket.emit("collab:awareness", { roomCode, update: Array.from(update) });
       }
-    });
-
-    socket.on("collab:users", (users) => setOnlineUsers(users));
-
-    socket.on("collab:chat", () => {});
+    };
+    awareness.on("update", onAwarenessUpdate);
 
     const binding = new MonacoBinding(
       ytext,
@@ -98,48 +101,47 @@ export default function CollabEditor({
     );
     bindingRef.current = binding;
 
-    editorRef.current.onDidChangeCursorPosition((e) => {
+    const cursorDisposable = editorRef.current.onDidChangeCursorPosition((e) => {
       awareness.setLocalStateField("cursor", {
         line: e.position.lineNumber,
         column: e.position.column,
       });
     });
 
-    return () => {
+    cleanupRef.current = () => {
+      cursorDisposable.dispose();
       binding.destroy();
       awareness.destroy();
       ydoc.destroy();
-      socket.emit("collab:leave", { roomCode, userId });
-      socket.disconnect();
+      socket.off("collab:sync", onSync);
+      socket.off("collab:awareness", onRemoteAwareness);
+      bindingRef.current = null;
     };
-  }, [roomCode, username, userId, language]);
+  }, [roomCode, username, userId, socket]);
 
   const handleMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+    setMounted(true);
     editor.focus();
   };
 
+  useEffect(() => {
+    if (mounted && socket?.connected) setupCollab();
+    else if (mounted && socket) {
+      const onConnect = () => setupCollab();
+      socket.on("connect", onConnect);
+      return () => socket.off("connect", onConnect);
+    }
+    return () => cleanupRef.current?.();
+  }, [mounted, setupCollab, socket, language]);
+
   return (
     <div className={cn("relative h-full w-full min-h-[200px]", className)}>
-      {onlineUsers.length > 0 && (
-        <div className="absolute top-2 right-2 z-10 flex flex-wrap gap-2 max-w-[50%]">
-          {onlineUsers.map((u) => (
-            <span
-              key={u.id}
-              className="text-[10px] px-2 py-0.5 rounded-full border"
-              style={{ borderColor: u.color, color: u.color }}
-            >
-              {u.name}
-            </span>
-          ))}
-        </div>
-      )}
-
       {remoteCursors.map((c) => (
         <div
           key={c.clientId}
-          className="absolute z-10 text-[10px] px-1 pointer-events-none"
+          className="absolute z-10 text-[10px] px-1 pointer-events-none whitespace-nowrap"
           style={{
             color: c.color,
             top: `${Math.min(90, 8 + (c.cursor?.line || 1) * 1.2)}%`,

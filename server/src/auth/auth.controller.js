@@ -2,7 +2,7 @@ import * as authService from "./auth.service.js";
 import { registerSchema, loginSchema } from "./auth.validator.js";
 import { AppError } from "../utils/AppError.js";
 import { env } from "../config/env.js";
-import { parseExpiresToMs } from "../utils/jwt.js";
+import { parseExpiresToMs, verifyToken } from "../utils/jwt.js";
 import { ZodError } from "zod";
 
 function setAuthCookies(res, { accessToken, refreshToken }) {
@@ -73,6 +73,26 @@ export async function verifyEmail(req, res, next) {
     const result = await authService.verifyEmail(token);
     res.json(result);
   } catch (err) {
+    next(err);
+  }
+}
+
+export async function refresh(req, res, next) {
+  try {
+    const refreshToken = req.cookies?.refreshToken;
+    if (!refreshToken) throw new AppError("Refresh token required", 401);
+
+    const result = await authService.refreshAccessToken(refreshToken);
+    res.cookie("accessToken", result.accessToken, {
+      httpOnly: true,
+      secure: env.nodeEnv === "production",
+      sameSite: env.nodeEnv === "production" ? "strict" : "lax",
+      maxAge: parseExpiresToMs(env.jwt.accessExpires),
+    });
+    res.json({ user: result.user });
+  } catch (err) {
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
     next(err);
   }
 }

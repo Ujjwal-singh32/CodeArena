@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeArena Admin — Upload Problems</title>
+  <title>CodeArena Admin</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #070707; color: #eee; min-height: 100vh; }
@@ -12,109 +12,256 @@
     .sub { color: #888; margin-bottom: 2rem; }
     .card { background: #111; border: 1px solid #242424; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
     label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.4rem; }
-    textarea { width: 100%; min-height: 360px; background: #0a0a0a; border: 1px solid #333; color: #eee; border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 13px; }
-    .row { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
-    button, .btn { background: #00ff88; color: #000; border: none; padding: 0.65rem 1.2rem; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
+    input, select, textarea { width: 100%; background: #0a0a0a; border: 1px solid #333; color: #eee; border-radius: 8px; padding: 0.65rem; font-size: 14px; margin-bottom: 1rem; }
+    textarea { min-height: 100px; font-family: monospace; font-size: 13px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+    button, .btn { background: #00ff88; color: #000; border: none; padding: 0.65rem 1.2rem; border-radius: 8px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #222; color: #eee; border: 1px solid #444; }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .tab { padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid #333; background: #0a0a0a; color: #aaa; cursor: pointer; }
+    .tab.active { border-color: #00ff88; color: #00ff88; }
+    .panel { display: none; }
+    .panel.active { display: block; }
     .msg { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; font-size: 0.9rem; }
     .msg.ok { background: rgba(0,255,136,0.1); color: #00ff88; border: 1px solid rgba(0,255,136,0.3); }
     .msg.err { background: rgba(255,80,80,0.1); color: #ff6666; border: 1px solid rgba(255,80,80,0.3); }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
     th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #222; }
     th { color: #888; font-weight: 500; }
-    code { background: #1a1a1a; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
-    ul { margin: 0.5rem 0 0 1.2rem; color: #aaa; font-size: 0.9rem; line-height: 1.6; }
+    .tc-row { border: 1px solid #222; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+    h3 { font-size: 0.95rem; margin: 1rem 0 0.5rem; color: #ccc; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>CodeArena Admin</h1>
-    <p class="sub">Upload competitive programming problems in JSON format</p>
+    <p class="sub">Add problems and test cases via forms</p>
 
-    <div class="card">
-      <h2 style="margin-bottom:1rem;font-size:1.1rem;">Required JSON format</h2>
-      <ul>
-        <li><code>title</code>, <code>slug</code>, <code>statement</code>, <code>inputFormat</code>, <code>outputFormat</code>, <code>constraints</code></li>
-        <li><code>difficulty</code>: EASY | MEDIUM | HARD</li>
-        <li><code>testCases</code>: array with <code>input</code>, <code>expectedOutput</code>, optional <code>isSample</code></li>
-        <li><code>examples</code>, <code>tags</code>, <code>categories</code>, <code>boilerplates</code> (optional but recommended)</li>
-        <li>Users must follow <code>inputFormat</code> — stdin/stdout judging like Codeforces</li>
-      </ul>
-      <div class="row">
-        <a class="btn secondary" href="/templates/problem-template.json" download>Download template</a>
-        <button type="button" class="secondary" id="loadTemplate">Load template into editor</button>
-      </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="problem">Add Problem</button>
+      <button class="tab" data-tab="tests">Add Test Cases</button>
+      <button class="tab" data-tab="json">JSON Upload</button>
+      <button class="tab" data-tab="list">Problems</button>
     </div>
 
-    <div class="card">
-      <label for="json">Problem JSON</label>
-      <textarea id="json" placeholder="Paste problem JSON here..."></textarea>
+    <div id="panel-problem" class="panel active card">
+      <h2>Problem Details</h2>
       <div class="row">
-        <button type="button" id="upload">Upload Problem</button>
-        <button type="button" class="secondary" id="validate">Validate JSON</button>
-        <button type="button" class="secondary" id="refresh">Refresh list</button>
+        <div><label>Title</label><input id="p-title" placeholder="Two Sum" /></div>
+        <div><label>Slug</label><input id="p-slug" placeholder="two-sum" /></div>
       </div>
-      <div id="message"></div>
+      <label>Statement</label>
+      <textarea id="p-statement" rows="5" placeholder="Problem description (markdown **bold** supported)"></textarea>
+      <div class="row">
+        <div><label>Input Format</label><textarea id="p-input" rows="3"></textarea></div>
+        <div><label>Output Format</label><textarea id="p-output" rows="3"></textarea></div>
+      </div>
+      <label>Constraints (one per line)</label>
+      <textarea id="p-constraints" rows="3"></textarea>
+      <div class="row-3">
+        <div>
+          <label>Difficulty</label>
+          <select id="p-difficulty">
+            <option value="EASY">Easy</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HARD">Hard</option>
+          </select>
+        </div>
+        <div><label>Time Limit (sec)</label><input id="p-time" type="number" value="2" /></div>
+        <div><label>Memory Limit (MB)</label><input id="p-memory" type="number" value="256" /></div>
+      </div>
+      <div class="row">
+        <div><label>Tags (comma-separated)</label><input id="p-tags" placeholder="Array, Hash Table" /></div>
+        <div><label>Categories (comma-separated)</label><input id="p-categories" placeholder="Arrays" /></div>
+      </div>
+      <h3>Example 1</h3>
+      <div class="row">
+        <div><label>Input</label><textarea id="ex1-in" rows="2"></textarea></div>
+        <div><label>Output</label><textarea id="ex1-out" rows="2"></textarea></div>
+      </div>
+      <label>Explanation</label>
+      <input id="ex1-exp" />
+      <h3>Sample Test Cases (included with problem)</h3>
+      <div class="tc-row">
+        <label>Test 1 Input</label><textarea id="tc1-in" rows="2"></textarea>
+        <label>Expected Output</label><textarea id="tc1-out" rows="2"></textarea>
+      </div>
+      <div class="tc-row">
+        <label>Test 2 Input</label><textarea id="tc2-in" rows="2"></textarea>
+        <label>Expected Output</label><textarea id="tc2-out" rows="2"></textarea>
+      </div>
+      <button type="button" id="createProblem">Create Problem</button>
+      <div id="msg-problem"></div>
     </div>
 
-    <div class="card">
-      <h2 style="margin-bottom:1rem;font-size:1.1rem;">Existing problems</h2>
-      <div id="problems">Loading...</div>
+    <div id="panel-tests" class="panel card">
+      <h2>Add Test Cases to Existing Problem</h2>
+      <label>Select Problem</label>
+      <select id="tc-problem"><option value="">Loading...</option></select>
+      <div id="tc-container"></div>
+      <button type="button" class="secondary" id="addTcRow">+ Add Test Case Row</button>
+      <button type="button" id="submitTests">Add Test Cases</button>
+      <div id="msg-tests"></div>
+    </div>
+
+    <div id="panel-json" class="panel card">
+      <h2>JSON Upload (advanced)</h2>
+      <textarea id="json" style="min-height:360px" placeholder="Paste problem JSON..."></textarea>
+      <div style="display:flex;gap:1rem;margin-top:1rem">
+        <button type="button" id="upload">Upload JSON</button>
+        <button type="button" class="secondary" id="loadTemplate">Load Template</button>
+      </div>
+      <div id="msg-json"></div>
+    </div>
+
+    <div id="panel-list" class="panel card">
+      <h2>Existing Problems</h2>
+      <button type="button" class="secondary" id="refresh">Refresh</button>
+      <div id="problems" style="margin-top:1rem">Loading...</div>
     </div>
   </div>
 
   <script>
-    const jsonEl = document.getElementById("json");
-    const msgEl = document.getElementById("message");
-    const problemsEl = document.getElementById("problems");
-
-    function showMsg(text, ok) {
-      msgEl.className = "msg " + (ok ? "ok" : "err");
-      msgEl.textContent = text;
-    }
-
-    document.getElementById("loadTemplate").onclick = async () => {
-      const res = await fetch("/templates/problem-template.json");
-      jsonEl.value = await res.text();
-      showMsg("Template loaded.", true);
+    const msg = (el, text, ok) => {
+      el.className = "msg " + (ok ? "ok" : "err");
+      el.textContent = text;
     };
 
-    document.getElementById("validate").onclick = () => {
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.onclick = () => {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+      };
+    });
+
+    function slugify(s) {
+      return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    }
+
+    document.getElementById("p-title").addEventListener("input", (e) => {
+      const slug = document.getElementById("p-slug");
+      if (!slug.dataset.manual) slug.value = slugify(e.target.value);
+    });
+    document.getElementById("p-slug").addEventListener("input", () => {
+      document.getElementById("p-slug").dataset.manual = "1";
+    });
+
+    document.getElementById("createProblem").onclick = async () => {
+      const el = document.getElementById("msg-problem");
+      const body = {
+        title: document.getElementById("p-title").value.trim(),
+        slug: document.getElementById("p-slug").value.trim(),
+        statement: document.getElementById("p-statement").value.trim(),
+        inputFormat: document.getElementById("p-input").value.trim(),
+        outputFormat: document.getElementById("p-output").value.trim(),
+        constraints: document.getElementById("p-constraints").value.trim(),
+        difficulty: document.getElementById("p-difficulty").value,
+        timeLimit: parseInt(document.getElementById("p-time").value, 10),
+        memoryLimit: parseInt(document.getElementById("p-memory").value, 10),
+        tags: document.getElementById("p-tags").value.split(",").map((s) => s.trim()).filter(Boolean),
+        categories: document.getElementById("p-categories").value.split(",").map((s) => s.trim()).filter(Boolean),
+        isPublished: true,
+        examples: [{
+          input: document.getElementById("ex1-in").value,
+          output: document.getElementById("ex1-out").value,
+          explanation: document.getElementById("ex1-exp").value || undefined,
+        }],
+        testCases: [
+          { input: document.getElementById("tc1-in").value, expectedOutput: document.getElementById("tc1-out").value, isSample: true },
+          { input: document.getElementById("tc2-in").value, expectedOutput: document.getElementById("tc2-out").value, isSample: true },
+        ].filter((tc) => tc.input && tc.expectedOutput),
+      };
       try {
-        JSON.parse(jsonEl.value);
-        showMsg("Valid JSON.", true);
+        const res = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message || "Failed");
+        msg(el, "Problem created: " + (data.problem?.title || body.title), true);
+        loadProblems();
       } catch (e) {
-        showMsg("Invalid JSON: " + e.message, false);
+        msg(el, e.message, false);
       }
     };
 
-    document.getElementById("upload").onclick = async () => {
+    function addTcRow() {
+      const div = document.createElement("div");
+      div.className = "tc-row";
+      div.innerHTML = `
+        <label>Input</label><textarea class="tc-in" rows="2"></textarea>
+        <label>Expected Output</label><textarea class="tc-out" rows="2"></textarea>
+        <label><input type="checkbox" class="tc-sample" checked /> Sample (visible to users)</label>
+      `;
+      document.getElementById("tc-container").appendChild(div);
+    }
+
+    document.getElementById("addTcRow").onclick = addTcRow;
+    addTcRow();
+
+    document.getElementById("submitTests").onclick = async () => {
+      const el = document.getElementById("msg-tests");
+      const problemId = document.getElementById("tc-problem").value;
+      if (!problemId) return msg(el, "Select a problem first", false);
+      const rows = document.querySelectorAll("#tc-container .tc-row");
+      const testCases = [];
+      rows.forEach((row) => {
+        const input = row.querySelector(".tc-in").value;
+        const expectedOutput = row.querySelector(".tc-out").value;
+        const isSample = row.querySelector(".tc-sample").checked;
+        if (input && expectedOutput) testCases.push({ input, expectedOutput, isSample });
+      });
+      if (!testCases.length) return msg(el, "Add at least one test case", false);
       try {
-        const body = JSON.parse(jsonEl.value);
-        const res = await fetch("/api/upload", {
+        const res = await fetch(`/api/problems/${problemId}/test-cases`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ testCases }),
         });
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message || "Failed");
+        msg(el, `Added ${testCases.length} test case(s)`, true);
+      } catch (e) {
+        msg(el, e.message, false);
+      }
+    };
+
+    document.getElementById("loadTemplate").onclick = async () => {
+      const res = await fetch("/templates/problem-template.json");
+      document.getElementById("json").value = await res.text();
+      msg(document.getElementById("msg-json"), "Template loaded.", true);
+    };
+
+    document.getElementById("upload").onclick = async () => {
+      const el = document.getElementById("msg-json");
+      try {
+        const body = JSON.parse(document.getElementById("json").value);
+        const res = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const data = await res.json();
         if (!res.ok) throw new Error(data.error || data.message || "Upload failed");
-        showMsg("Problem uploaded: " + (data.problem?.title || body.title), true);
+        msg(el, "Uploaded: " + (data.problem?.title || body.title), true);
         loadProblems();
       } catch (e) {
-        showMsg(e.message, false);
+        msg(el, e.message, false);
       }
     };
 
     async function loadProblems() {
+      const problemsEl = document.getElementById("problems");
+      const selectEl = document.getElementById("tc-problem");
       try {
         const res = await fetch("/api/problems");
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to load");
-        const rows = (data.problems || []).map((p) =>
-          `<tr><td>${p.id}</td><td>${p.title}</td><td>${p.slug}</td><td>${p.difficulty}</td><td>${p.isPublished ? "Yes" : "No"}</td></tr>`
-        ).join("");
-        problemsEl.innerHTML = rows
-          ? `<table><thead><tr><th>ID</th><th>Title</th><th>Slug</th><th>Level</th><th>Published</th></tr></thead><tbody>${rows}</tbody></table>`
+        if (!res.ok) throw new Error(data.error || "Failed");
+        const list = data.problems || [];
+        selectEl.innerHTML = list.length
+          ? list.map((p) => `<option value="${p.id}">#${p.id} ${p.title} (${p.slug})</option>`).join("")
+          : `<option value="">No problems</option>`;
+        problemsEl.innerHTML = list.length
+          ? `<table><thead><tr><th>ID</th><th>Title</th><th>Slug</th><th>Level</th><th>Published</th></tr></thead><tbody>${list.map((p) =>
+              `<tr><td>${p.id}</td><td>${p.title}</td><td>${p.slug}</td><td>${p.difficulty}</td><td>${p.isPublished ? "Yes" : "No"}</td></tr>`
+            ).join("")}</tbody></table>`
           : "<p style='color:#888'>No problems yet.</p>";
       } catch (e) {
         problemsEl.innerHTML = `<p style='color:#f66'>${e.message}</p>`;
