@@ -27,7 +27,7 @@ export const env = {
   ai: {
     apiKey: process.env.COHERE_API_KEY || process.env.AI_API_KEY,
     apiUrl: process.env.COHERE_API_URL || process.env.AI_API_URL || "https://api.cohere.ai/v2/chat",
-    model: process.env.COHERE_MODEL || process.env.AI_MODEL || "command-r-plus",
+    model: process.env.COHERE_MODEL || process.env.AI_MODEL || "command-a-plus-05-2026",
   },
   execution: {
     enabled: process.env.EXECUTION_ENABLED === "true",
