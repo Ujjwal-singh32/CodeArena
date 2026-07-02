@@ -9,7 +9,7 @@ const PROMPTS = {
   doubt: (ctx) =>
     `Answer this DSA question about the problem.\nProblem: ${ctx.problemTitle}\nQuestion: ${ctx.question}\nCode context:\n${ctx.code || "N/A"}`,
   review: (ctx) =>
-    `Review this accepted submission. Provide time/space complexity, unnecessary code, and optimization tips.\nLanguage: ${ctx.language}\nCode:\n${ctx.code}`,
+    `Review this accepted submission. Return ONLY a valid JSON object with exactly three keys: "timeComplexity", "spaceComplexity", and "optimizationTips". Do not wrap the response in markdown tags.\nLanguage: ${ctx.language}\nCode:\n${ctx.code}`,
 };
 
 export async function aiAssist({ mode, code, language, problemTitle, question }) {
@@ -34,7 +34,7 @@ async function callCohere(prompt) {
     body: JSON.stringify({
       model: env.ai.model,
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 800,
+      max_tokens: 8000,
     }),
   });
 
@@ -45,8 +45,18 @@ async function callCohere(prompt) {
   }
 
   const data = await res.json();
+  
+  // Handle Cohere V2 Array format (extracts 'text' and ignores 'thinking' blocks)
+  if (Array.isArray(data.message?.content)) {
+    const textBlock = data.message.content.find((block) => block.type === "text");
+    if (textBlock) {
+      return textBlock.text;
+    }
+  }
+
+  // Fallbacks for older V1 formats or unexpected structures
   return (
-    data.message?.content?.[0]?.text ||
+    data.message?.content ||
     data.text ||
     data.generations?.[0]?.text ||
     data.choices?.[0]?.message?.content ||
@@ -89,22 +99,38 @@ export async function generateAiReview(submissionId) {
     problemTitle: submission.problem.title,
   });
 
+  // Safely parse the JSON returned by the AI review prompt
+  let parsedReview = {
+    timeComplexity: "Unknown",
+    spaceComplexity: "Unknown",
+    optimizationTips: response,
+  };
+
+  try {
+    // Strip markdown formatting if the AI accidentally includes it
+    const cleanJsonString = response.replace(/```json/g, "").replace(/```/g, "").trim();
+    const jsonResponse = JSON.parse(cleanJsonString);
+    
+    parsedReview = {
+      timeComplexity: jsonResponse.timeComplexity || "Unknown",
+      spaceComplexity: jsonResponse.spaceComplexity || "Unknown",
+      optimizationTips: jsonResponse.optimizationTips || response,
+    };
+  } catch (error) {
+    console.error("Failed to parse AI Review JSON:", error);
+  }
+
   const review = await prisma.aIReview.create({
     data: {
       submissionId,
-      feedback: response,
-      timeComplexity: extractLine(response, "time"),
-      spaceComplexity: extractLine(response, "space"),
-      optimizationTips: response,
+      feedback: "Automated Code Review Completed.",
+      timeComplexity: parsedReview.timeComplexity,
+      spaceComplexity: parsedReview.spaceComplexity,
+      optimizationTips: parsedReview.optimizationTips,
     },
   });
 
   return review;
-}
-
-function extractLine(text, keyword) {
-  const line = text.split("\n").find((l) => l.toLowerCase().includes(keyword));
-  return line || null;
 }
 
 function getMockResponse(mode, problemTitle, question) {
@@ -114,7 +140,11 @@ function getMockResponse(mode, problemTitle, question) {
     doubt: question
       ? `"${question}" — Start by clarifying inputs/outputs, then pick the right data structure. For ${problemTitle || "this problem"}, consider a single-pass approach.`
       : "Break the problem into smaller steps. Identify the pattern (two pointers, sliding window, etc.) before coding.",
-    review: "Time: O(n), Space: O(n). Consider whether you can reduce space to O(1). Remove redundant variables and early-exit when possible.",
+    review: JSON.stringify({
+      timeComplexity: "O(n)",
+      spaceComplexity: "O(n)",
+      optimizationTips: "Consider whether you can reduce space to O(1). Remove redundant variables and early-exit when possible."
+    }),
   };
   return mocks[mode] || mocks.doubt;
 }

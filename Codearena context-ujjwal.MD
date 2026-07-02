@@ -762,115 +762,25 @@ npm run dev:all
 
 ---
 
-## 10. CURRENT STATUS (July 2026 — latest fixes)
+## 10. CURRENT STATUS (July 2026)
 
-### Fixed in this session
-- **Practice submit hang** — workers now start **after** Redis connects; BullMQ used only when Redis is healthy, otherwise inline processing; enqueue failures fall back to inline; socket verdict push + polling both work
-- **All judge languages** — JS, Python, C, C++, Java in selector with default boilerplates per problem
-- **Friendly verdict output** — `formatJudgeOutput` on server + `formatVerdictOutput` on client (no raw `/sandbox/` paths)
-- **AI panel** — `/ai/assist` works (mock fallback when no Cohere key)
-- **1v1 Duel** — chat with correct username + `senderId`; optimistic messages without duplicates; `duel:match-update` / `duel:started` sync; `duel:submit-win` calls `finishMatch`; boilerplate loads when match starts
-- **Collab** — single shared socket (no duplicate join); users deduped by `odId`; chat deduped via `clientMsgId`; Yjs sync via shared socket; live cursor labels
-- **Admin** — form-based problem + test case tabs; auto-seeds default boilerplates for all languages on create
-- **Auth sessions** — JWT access default **1h**; silent refresh every 5 min + on tab focus; 401 retry only after successful refresh
-
-### Completed (prior + current)
+### Completed
 - Auth with email verification gate on login + run/submit
 - ioredis for cache, rate limit, BullMQ
-- Admin panel — form upload + Add Test Cases tab
-- Frontend wired to real APIs
-- Practice submit — Socket.IO verdict + polling fallback
-- Docker → local fallback when Docker daemon unavailable
+- Admin panel for problem upload with JSON template
+- Frontend wired to real APIs (no dummy data on core pages)
+- AuthContext — Navbar/Profile show logout when logged in
+- Users API: dashboard, profile, leaderboard, platform stats
 
 ### Optional / partial
 - Contest feature (UI placeholder only)
-- Docker sandbox on VPS (local fallback works for dev)
-- Collab cursor positioning is approximate (not pixel-perfect Monaco overlays)
+- Duel room full Socket.IO sync (backend exists, room UI basic)
+- Yjs collab editor (partial)
+- Docker sandbox deployment on VPS
 
 ---
 
-## 11. HOW TO RUN (FULL SETUP)
-
-### Prerequisites
-- Node.js 20+
-- PostgreSQL (Neon) — `DATABASE_URL` in `server/.env`
-- Redis — `REDIS_URL` (BullMQ workers; inline fallback if unavailable)
-- (Optional) Kafka — `KAFKA_ENABLED=true`
-- (Optional) Docker Desktop — for isolated sandbox; **without Docker**, set `EXECUTION_ENABLED=false` in `server/.env` OR rely on automatic local fallback
-- Cohere API key (optional), SMTP (optional), Admin API key
-
-### 1. Clone & install
-```bash
-npm install
-cd admin && npm install && cd ..
-```
-
-### 2. Environment
-```bash
-cp .env.example .env
-# Root .env is optional; main config lives in server/.env
-
-cp .env.example server/.env
-# Fill in: DATABASE_URL, JWT_SECRET, REDIS_URL, COHERE_API_KEY, SMTP_*, ADMIN_API_KEY
-# For local dev without Docker: EXECUTION_ENABLED=false
-
-cp admin/.env.example admin/.env
-# Set ADMIN_API_KEY to match server/.env
-```
-
-Client env (create `client/.env.local` or set in shell):
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
-NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
-```
-> Docker Compose maps backend to port **5001** — use `5001` instead of `5000` if running via `docker-compose up`.
-
-### 3. Database
-```bash
-cd server
-npx prisma migrate deploy
-node prisma/seed.js
-```
-
-### 4. (Optional) Docker sandbox image
-```bash
-cd server/docker/sandbox
-docker build -t codearena-sandbox:latest .
-# Then set EXECUTION_ENABLED=true in server/.env
-```
-
-### 5. Start development
-```bash
-# From project root — client (3000) + server (5000)
-npm run dev
-
-# With admin panel (5001)
-npm run dev:all
-```
-
-### 6. URLs
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:3000 |
-| API | http://localhost:5000/api/v1 |
-| Health | http://localhost:5000/health |
-| Admin upload | http://localhost:5001 |
-
-### 7. Demo account (after seed)
-- Email: `demo@codearena.dev`
-- Password: `password123`
-- Problem: `/practice/two-sum`
-
-### 8. Verify core flows
-1. Login → Practice → Run/Submit (verdict should complete, not hang)
-2. Practice AI panel → Hint / Fix Syntax / Ask Doubt
-3. Duel → Create game → second user joins → both submit config → timer + problem appear
-4. Collab → create room → two browsers → edits sync, chat once per message
-5. Admin → http://localhost:5001 → Add Problem form / Add Test Cases tab
-
----
-
-## 12. RULES FOR AI CODERS
+## 11. RULES FOR AI CODERS
 
 - JavaScript only (no TypeScript)
 - Modular: controller → service → routes → validator
