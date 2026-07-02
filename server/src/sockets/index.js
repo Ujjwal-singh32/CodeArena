@@ -1,12 +1,15 @@
 import prisma from "../config/db.js";
 import { finishMatch } from "../duel/duel.service.js";
+import * as Y from "yjs";
 
 const collabRooms = new Map();
+// 1. Add a map to track our cleanup timers
+const cleanupTimers = new Map(); 
 
 function getCollabRoom(code) {
   const key = code.toUpperCase();
   if (!collabRooms.has(key)) {
-    collabRooms.set(key, { users: new Map(), docState: null });
+    collabRooms.set(key, { users: new Map(), ydoc: new Y.Doc() }); 
   }
   return collabRooms.get(key);
 }
@@ -19,28 +22,36 @@ export function setupSockets(io) {
 
     // ── Collab (Yjs sync + chat) ──
     socket.on("collab:join", ({ roomCode, userId, username, color }) => {
+      const key = roomCode.toUpperCase();
       const room = getCollabRoom(roomCode);
       const odId = String(userId || socket.id);
+      
       room.users.set(socket.id, {
         id: socket.id,
         odId,
         name: username || "guest",
         color: color || "#00ff88",
       });
-      socket.join(`collab:${roomCode.toUpperCase()}`);
-      socket.collabRoom = roomCode.toUpperCase();
+      
+      socket.join(`collab:${key}`);
+      socket.collabRoom = key;
       socket.collabUserId = odId;
 
-      if (room.docState) {
-        socket.emit("collab:sync", { update: room.docState });
+      // 2. If someone joins, CANCEL any pending room deletion timer!
+      if (cleanupTimers.has(key)) {
+        clearTimeout(cleanupTimers.get(key));
+        cleanupTimers.delete(key);
       }
+
+      const stateVector = Y.encodeStateAsUpdate(room.ydoc);
+      socket.emit("collab:sync", { update: Array.from(stateVector) });
 
       broadcastCollabUsers(io, roomCode);
     });
 
     socket.on("collab:update", ({ roomCode, update }) => {
       const room = getCollabRoom(roomCode);
-      room.docState = update;
+      Y.applyUpdate(room.ydoc, new Uint8Array(update));
       socket.to(`collab:${roomCode.toUpperCase()}`).emit("collab:sync", { update });
     });
 
@@ -115,10 +126,29 @@ export function setupSockets(io) {
 }
 
 function leaveCollabRoom(socket, io, roomCode) {
-  const room = getCollabRoom(roomCode);
+  const key = roomCode.toUpperCase();
+  const room = collabRooms.get(key);
+  
+  if (!room) return;
+
   room.users.delete(socket.id);
-  socket.leave(`collab:${roomCode.toUpperCase()}`);
-  broadcastCollabUsers(io, roomCode);
+  socket.leave(`collab:${key}`);
+  
+  // 3. The Grace Period Logic
+  if (room.users.size === 0) {
+    // Wait 24 hours (86400000 milliseconds) before destroying the code
+    const timer = setTimeout(() => {
+      if (collabRooms.has(key) && collabRooms.get(key).users.size === 0) {
+        collabRooms.get(key).ydoc.destroy();
+        collabRooms.delete(key);
+        cleanupTimers.delete(key);
+      }
+    }, 24 * 60 * 60 * 1000); // <-- 24 hours
+    
+    cleanupTimers.set(key, timer);
+  } else {
+    broadcastCollabUsers(io, roomCode);
+  }
 }
 
 function broadcastCollabUsers(io, roomCode) {

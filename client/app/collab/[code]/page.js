@@ -14,13 +14,20 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
-import CollabEditor from "@/components/editor/CollabEditor";
+import dynamic from "next/dynamic";
 import { LANGUAGES } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { io } from "socket.io-client";
 import { getSocketUrl, aiApi } from "@/services/api";
 import { cn } from "@/lib/utils";
-import ReactMarkdown from "react-markdown"; // Imported ReactMarkdown
+import ReactMarkdown from "react-markdown";
+
+// CRITICAL FIX: Dynamic imports must be OUTSIDE the component.
+// Otherwise, React destroys and recreates the editor on every single keystroke/render!
+const CollabEditor = dynamic(() => import("@/components/editor/CollabEditor"), {
+  ssr: false,
+  loading: () => <div className="p-4 text-sm text-muted">Loading Editor...</div>
+});
 
 export default function CollabRoomPage() {
   const params = useParams();
@@ -44,6 +51,12 @@ export default function CollabRoomPage() {
   );
   const username = user?.username || "guest";
 
+  // THE FIX: Track user data in a Ref so it doesn't trigger useEffect disconnects
+  const userRef = useRef({ id: userId, name: username });
+  useEffect(() => {
+    userRef.current = { id: userId, name: username };
+  }, [userId, username]);
+
   const addChatMessage = (msg) => {
     const key = msg.clientMsgId || msg.id;
     if (key && seenChatIdsRef.current.has(key)) return;
@@ -58,7 +71,13 @@ export default function CollabRoomPage() {
     socket.on("connect", () => {
       mySocketIdRef.current = socket.id;
       setSocketReady(true);
-      socket.emit("collab:join", { roomCode, userId, username, color: "#00ff88" });
+      // Use userRef here so auth refreshes don't break the socket connection
+      socket.emit("collab:join", { 
+        roomCode, 
+        userId: userRef.current.id, 
+        username: userRef.current.name, 
+        color: "#00ff88" 
+      });
     });
 
     socket.on("collab:users", (users) => {
@@ -68,7 +87,7 @@ export default function CollabRoomPage() {
           username: u.name,
           color: u.color,
           isOnline: true,
-          isMe: u.odId === userId,
+          isMe: u.odId === userRef.current.id, // Update this check too
         }))
       );
     });
@@ -85,12 +104,12 @@ export default function CollabRoomPage() {
     });
 
     return () => {
-      socket.emit("collab:leave", { roomCode, userId });
+      socket.emit("collab:leave", { roomCode, userId: userRef.current.id });
       socket.disconnect();
       socketRef.current = null;
       setSocketReady(false);
     };
-  }, [roomCode, userId, username]);
+  }, [roomCode]); // <-- CRITICAL: Removed userId and username from here!
 
   const sendChat = async () => {
     if (!chatInput.trim()) return;
@@ -157,7 +176,7 @@ export default function CollabRoomPage() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass flex-shrink-0">
         <div className="flex items-center gap-3">
           <Link href="/collab" className="text-muted hover:text-primary transition-colors">
             <ChevronLeft className="w-5 h-5" />
@@ -185,7 +204,7 @@ export default function CollabRoomPage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden min-h-0">
-        <div className="w-50 border-r border-border p-4 shrink-0 hidden md:block overflow-y-auto">
+        <div className="w-[200px] border-r border-border p-4 flex-shrink-0 hidden md:block overflow-y-auto">
           <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Online</h4>
           <div className="space-y-3">
             {members.map((m) => (
@@ -208,7 +227,7 @@ export default function CollabRoomPage() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card flex-shrink-0">
             <Select
               options={LANGUAGES}
               value={language}
@@ -233,7 +252,7 @@ export default function CollabRoomPage() {
           </div>
         </div>
 
-        <div className="w-[320px] border-l border-border flex flex-col shrink-0 hidden lg:flex">
+        <div className="w-[320px] border-l border-border flex flex-col flex-shrink-0 hidden lg:flex">
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
             <MessageSquare className="w-4 h-4 text-muted" />
             <span className="text-xs font-medium">Chat</span>
@@ -258,7 +277,6 @@ export default function CollabRoomPage() {
                   </div>
                 )}
                 
-                {/* Formatting block applied conditionally for AI messages */}
                 {msg.isAi ? (
                   <div className="text-foreground">
                     <ReactMarkdown
