@@ -5,6 +5,7 @@ import { Send, Bot, Sparkles, Wrench } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { aiApi } from "@/services/api";
+import ReactMarkdown from "react-markdown";
 
 export default function AIPanel({
   messages: initialMessages = [],
@@ -40,9 +41,12 @@ export default function AIPanel({
     } catch {
       const fallbacks = {
         hint: "Try breaking the problem into smaller steps. Consider what data structure fits best for lookups.",
-        syntax: "Review your brackets, semicolons, and return statements. Ensure the function returns the expected type.",
+        syntax:
+          "Review your brackets, semicolons, and return statements. Ensure the function returns the expected type.",
       };
-      appendAssistant(fallbacks[mode] || "AI is unavailable. Please try again later.");
+      appendAssistant(
+        fallbacks[mode] || "AI is unavailable. Please try again later.",
+      );
     } finally {
       setActionLoading(null);
       setLoading(false);
@@ -72,7 +76,7 @@ export default function AIPanel({
       appendAssistant(res.response || res.message || "No response from AI.");
     } catch {
       appendAssistant(
-        "The two-sum problem can be solved in O(n) time using a single pass with a hash map. Would you like me to explain step by step?"
+        "The two-sum problem can be solved in O(n) time using a single pass with a hash map. Would you like me to explain step by step?",
       );
     } finally {
       setLoading(false);
@@ -94,7 +98,7 @@ export default function AIPanel({
             "flex items-center gap-1.5 px-3 py-2 text-xs rounded-md transition-all cursor-pointer border border-border",
             actionLoading === "syntax"
               ? "bg-primary/10 text-primary border-primary/30"
-              : "text-muted hover:text-foreground hover:border-primary/30"
+              : "text-muted hover:text-foreground hover:border-primary/30",
           )}
         >
           <Wrench className="w-3.5 h-3.5" />
@@ -107,7 +111,7 @@ export default function AIPanel({
             "flex items-center gap-1.5 px-3 py-2 text-xs rounded-md transition-all cursor-pointer border border-border",
             actionLoading === "hint"
               ? "bg-primary/10 text-primary border-primary/30"
-              : "text-muted hover:text-foreground hover:border-primary/30"
+              : "text-muted hover:text-foreground hover:border-primary/30",
           )}
         >
           <Sparkles className="w-3.5 h-3.5" />
@@ -115,23 +119,84 @@ export default function AIPanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
         {messages.length === 0 && (
           <p className="text-xs text-muted">
-            Use Fix Syntax or Hint for quick help. Ask questions below about the problem.
+            Use Fix Syntax or Hint for quick help. Ask questions below about the
+            problem.
           </p>
         )}
         {messages.map((msg) => (
           <div
             key={msg.id}
             className={cn(
-              "text-sm rounded-lg px-3 py-2 max-w-[90%]",
+              "text-sm rounded-lg px-4 py-3 max-w-[95%]",
               msg.role === "user"
                 ? "bg-primary/10 text-foreground ml-auto"
-                : "bg-background text-muted"
+                : "bg-background border border-border text-muted",
             )}
           >
-            {msg.content}
+            {msg.role === "assistant" ? (
+              <ReactMarkdown
+                components={{
+                  pre({ children }) {
+                    return (
+                      <pre className="bg-card rounded-md p-3 my-2 overflow-x-auto border border-border">
+                        {children}
+                      </pre>
+                    );
+                  },
+
+                  code({ className, children, ...props }) {
+                    return (
+                      <code
+                        className={cn(
+                          "font-mono text-[13px]",
+                          className
+                            ? "text-foreground/90"
+                            : "bg-card px-1.5 py-0.5 rounded-md border border-border text-primary",
+                        )}
+                        {...props}
+                      >
+                        {children}
+                      </code>
+                    );
+                  },
+
+                  h3: ({ children }) => (
+                    <h3 className="font-semibold text-primary mt-4 mb-2">
+                      {children}
+                    </h3>
+                  ),
+
+                  ul: ({ children }) => (
+                    <ul className="list-disc pl-5 my-2 space-y-1">
+                      {children}
+                    </ul>
+                  ),
+
+                  ol: ({ children }) => (
+                    <ol className="list-decimal pl-5 my-2 space-y-1">
+                      {children}
+                    </ol>
+                  ),
+
+                  strong: ({ children }) => (
+                    <strong className="font-semibold text-foreground">
+                      {children}
+                    </strong>
+                  ),
+
+                  p: ({ children }) => (
+                    <p className="leading-relaxed mb-2">{children}</p>
+                  ),
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
+            ) : (
+              msg.content
+            )}
           </div>
         ))}
         {loading && (
@@ -142,8 +207,10 @@ export default function AIPanel({
         )}
       </div>
 
-      <div className="p-3 border-t border-border">
-        <p className="text-[10px] text-muted mb-2 uppercase tracking-wider">Ask Doubt</p>
+      <div className="p-3 border-t border-border bg-card">
+        <p className="text-[10px] text-muted mb-2 uppercase tracking-wider">
+          Ask Doubt
+        </p>
         <div className="flex gap-2">
           <input
             value={input}
@@ -153,7 +220,11 @@ export default function AIPanel({
             disabled={loading}
             className="flex-1 px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted/60"
           />
-          <Button size="sm" onClick={handleSendDoubt} disabled={loading || !input.trim()}>
+          <Button
+            disabled={!input.trim() || loading}
+            onClick={handleSendDoubt}
+            size="sm"
+          >
             <Send className="w-4 h-4" />
           </Button>
         </div>

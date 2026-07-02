@@ -20,6 +20,7 @@ import { useAuth } from "@/context/AuthContext";
 import { io } from "socket.io-client";
 import { getSocketUrl, aiApi } from "@/services/api";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown"; // Imported ReactMarkdown
 
 export default function CollabRoomPage() {
   const params = useParams();
@@ -232,49 +233,83 @@ export default function CollabRoomPage() {
           </div>
         </div>
 
-        <div className="w-[280px] border-l border-border flex flex-col flex-shrink-0 hidden lg:flex">
+        <div className="w-[320px] border-l border-border flex flex-col flex-shrink-0 hidden lg:flex">
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
             <MessageSquare className="w-4 h-4 text-muted" />
             <span className="text-xs font-medium">Chat</span>
             <span className="text-[10px] text-muted ml-auto">@ for AI</span>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin">
             {chat.map((msg) => (
               <div
                 key={msg.id}
                 className={cn(
-                  "text-xs rounded-lg px-2 py-1.5",
-                  msg.isMe && "text-right",
+                  "text-xs rounded-lg px-3 py-2",
+                  msg.isMe && "bg-primary/10 ml-8",
+                  !msg.isMe && !msg.isAi && !msg.isSystem && "bg-card border border-border mr-8",
                   msg.isAi && "bg-primary/5 border border-primary/20",
-                  msg.isSystem && "text-muted italic text-center"
+                  msg.isSystem && "text-muted italic text-center mx-auto bg-transparent border-none p-1"
                 )}
               >
                 {!msg.isSystem && (
-                  <span className={cn("font-medium", msg.isAi ? "text-primary" : "text-muted")}>
-                    {msg.isAi && <Bot className="w-3 h-3 inline mr-1" />}
-                    {msg.sender}:{" "}
-                  </span>
+                  <div className={cn("font-medium mb-1", msg.isMe ? "text-primary text-right" : msg.isAi ? "text-primary" : "text-muted")}>
+                    {msg.isAi && <Bot className="w-3.5 h-3.5 inline mr-1" />}
+                    {msg.sender}
+                  </div>
                 )}
-                <span className="text-foreground">{msg.message}</span>
+                
+                {/* Formatting block applied conditionally for AI messages */}
+                {msg.isAi ? (
+                  <div className="text-foreground">
+                    <ReactMarkdown
+                      components={{
+                        code({ node, inline, className, children, ...props }) {
+                          return !inline ? (
+                            <div className="bg-background rounded-md p-2 my-2 overflow-x-auto border border-border">
+                              <code className="text-[11px] font-mono text-foreground/90" {...props}>
+                                {children}
+                              </code>
+                            </div>
+                          ) : (
+                            <code className="bg-background px-1 py-0.5 rounded text-primary text-[11px] font-mono border border-border" {...props}>
+                              {children}
+                            </code>
+                          );
+                        },
+                        p: ({ children }) => <p className="leading-relaxed mb-2 last:mb-0">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc pl-4 my-2 space-y-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-4 my-2 space-y-1">{children}</ol>,
+                        h3: ({ children }) => <h3 className="font-semibold text-primary mt-3 mb-1">{children}</h3>,
+                        strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                      }}
+                    >
+                      {msg.message}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className={cn("text-foreground", msg.isMe && "text-right")}>
+                    {msg.message}
+                  </div>
+                )}
               </div>
             ))}
             {aiLoading && (
-              <div className="text-xs text-muted flex items-center gap-2">
-                <Bot className="w-3 h-3 text-primary" />
+              <div className="text-xs text-muted flex items-center gap-2 px-2">
+                <Bot className="w-3 h-3 text-primary animate-pulse" />
                 AI is thinking...
               </div>
             )}
           </div>
-          <div className="p-2 border-t border-border flex gap-2">
+          <div className="p-3 border-t border-border flex gap-2 bg-card">
             <input
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && sendChat()}
               placeholder="Message... (@ for AI)"
-              className="flex-1 px-3 py-1.5 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary/50"
+              className="flex-1 px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary/50"
             />
-            <Button size="sm" onClick={sendChat} disabled={aiLoading}>
-              <Send className="w-3 h-3" />
+            <Button size="sm" onClick={sendChat} disabled={aiLoading || !chatInput.trim()}>
+              <Send className="w-3.5 h-3.5" />
             </Button>
           </div>
         </div>
