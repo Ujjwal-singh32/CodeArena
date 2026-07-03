@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Search, Filter } from "lucide-react";
+import { Search, Filter, ChevronLeft, ChevronRight } from "lucide-react";
 import Select from "@/components/ui/Select";
 import Tabs from "@/components/ui/Tabs";
+import Button from "@/components/ui/Button";
 import ProblemRow from "@/components/common/ProblemRow";
 import { problemsApi } from "@/services/api";
 
@@ -14,7 +15,7 @@ const difficultyTabs = [
   { id: "MEDIUM", label: "Medium" },
   { id: "HARD", label: "Hard" },
 ];
-
+const ITEMS_PER_PAGE = 8;
 export default function PracticePage() {
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +23,7 @@ export default function PracticePage() {
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("all");
   const [sortBy, setSortBy] = useState("default");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     problemsApi
@@ -31,6 +33,10 @@ export default function PracticePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, difficulty, sortBy]);
+
   const filtered = useMemo(() => {
     let result = [...problems];
 
@@ -39,7 +45,7 @@ export default function PracticePage() {
       result = result.filter(
         (p) =>
           p.title.toLowerCase().includes(q) ||
-          p.tags.some((t) => t.toLowerCase().includes(q))
+          p.tags.some((t) => t.toLowerCase().includes(q)),
       );
     }
 
@@ -47,12 +53,18 @@ export default function PracticePage() {
       result = result.filter((p) => p.difficulty === difficulty);
     }
 
-    if (sortBy === "acceptance") result.sort((a, b) => b.acceptance - a.acceptance);
-    if (sortBy === "title") result.sort((a, b) => a.title.localeCompare(b.title));
+    if (sortBy === "acceptance")
+      result.sort((a, b) => b.acceptance - a.acceptance);
+    if (sortBy === "title")
+      result.sort((a, b) => a.title.localeCompare(b.title));
 
     return result;
   }, [problems, search, difficulty, sortBy]);
-
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedProblems = filtered.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  );
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <motion.div
@@ -62,7 +74,9 @@ export default function PracticePage() {
       >
         <h1 className="text-3xl font-bold mb-2">Problems</h1>
         <p className="text-muted">
-          {loading ? "Loading problems..." : `${filtered.length} problems available`}
+          {loading
+            ? "Loading problems..."
+            : `${filtered.length} problems available`}
         </p>
       </motion.div>
 
@@ -89,7 +103,11 @@ export default function PracticePage() {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <Tabs tabs={difficultyTabs} activeTab={difficulty} onChange={setDifficulty} />
+        <Tabs
+          tabs={difficultyTabs}
+          activeTab={difficulty}
+          onChange={setDifficulty}
+        />
       </div>
 
       <div className="glass rounded-xl overflow-hidden">
@@ -117,6 +135,33 @@ export default function PracticePage() {
             </div>
           )}
         </div>
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-card/50">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => p - 1)}
+            >
+              <ChevronLeft className="w-4 h-4 mr-1" />
+              Prev
+            </Button>
+            <span className="text-sm font-medium text-muted">
+              Page <span className="text-foreground">{currentPage}</span> of{" "}
+              {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((p) => p + 1)}
+            >
+              Next
+              <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

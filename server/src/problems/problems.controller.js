@@ -4,6 +4,7 @@ export async function list(req, res, next) {
   try {
     const { difficulty, tag, search, page, limit } = req.query;
     const result = await problemsService.listProblems({
+      userId: req.user?.id,
       difficulty,
       tag,
       search,

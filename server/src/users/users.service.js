@@ -1,4 +1,6 @@
 import prisma from "../config/db.js";
+import { getRedis } from "../config/redis.js";
+const CACHE_TTL = 600;
 
 export async function getPlatformStats() {
   const [users, problems, submissions, matches] = await Promise.all([
@@ -17,6 +19,15 @@ export async function getPlatformStats() {
 }
 
 export async function getLeaderboard(limit = 10) {
+  const redis = getRedis();
+  const cacheKey = `leaderboard:${limit}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (err) {}
+  }
   const users = await prisma.user.findMany({
     orderBy: { rating: "desc" },
     take: limit,
@@ -28,13 +39,21 @@ export async function getLeaderboard(limit = 10) {
     },
   });
 
-  return users.map((u, i) => ({
+  const result = users.map((u, i) => ({
     rank: i + 1,
     userId: u.id,
     username: u.username,
     rating: u.rating,
     solvedCount: u.solvedCount,
   }));
+
+  if (redis) {
+    try {
+      await redis.setex(cacheKey, 300, JSON.stringify(result));
+    } catch (e) {}
+  }
+
+  return result;
 }
 
 export async function getUserRank(userId) {
@@ -47,58 +66,80 @@ export async function getUserRank(userId) {
 }
 
 export async function getUserDashboard(userId) {
+  const cacheKey = `dashboard:${userId}`;
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (err) {
+      console.warn("Redis get error:", err.message);
+    }
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { profile: true },
   });
   if (!user) return null;
 
-  const rank = await getUserRank(userId);
-
-  const submissions = await prisma.submission.findMany({
-    where: { userId },
-    include: { problem: { select: { title: true, slug: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 10,
-  });
-
-  const duels = await prisma.matchParticipant.findMany({
-    where: { userId },
-    include: {
-      match: {
-        include: {
-          participants: { include: { user: { select: { username: true } } } },
-          config: true,
+  const [
+    rank,
+    submissions,
+    duels,
+    activity,
+    heatmapSubmissions,
+    solvedProblems,
+    allTags,
+  ] = await Promise.all([
+    getUserRank(userId),
+    prisma.submission.findMany({
+      where: { userId },
+      include: { problem: { select: { title: true, slug: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    }),
+    prisma.matchParticipant.findMany({
+      where: { userId },
+      include: {
+        match: {
+          include: {
+            participants: { include: { user: { select: { username: true } } } },
+            config: true,
+          },
         },
       },
-    },
-    orderBy: { joinedAt: "desc" },
-    take: 10,
-  });
+      orderBy: { joinedAt: "desc" },
+      take: 10,
+    }),
+    prisma.submission.groupBy({
+      by: ["createdAt"],
+      where: { userId },
+      _count: true,
+    }),
+    prisma.submission.findMany({
+      where: { userId },
+      select: { createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 365,
+    }),
+    prisma.submission.findMany({
+      where: { userId, status: "ACCEPTED" },
+      select: { problem: { select: { tags: { include: { tag: true } } } } },
+    }),
+    prisma.tag.findMany(),
+  ]);
 
-  const activity = await prisma.submission.groupBy({
-    by: ["createdAt"],
-    where: { userId },
-    _count: true,
-  });
-
+  // 4. Process the data
   const heatmapMap = {};
-  for (const s of await prisma.submission.findMany({
-    where: { userId },
-    select: { createdAt: true },
-    orderBy: { createdAt: "desc" },
-    take: 365,
-  })) {
+  for (const s of heatmapSubmissions) {
     const day = s.createdAt.toISOString().slice(0, 10);
     heatmapMap[day] = (heatmapMap[day] || 0) + 1;
   }
-
-  const heatmapData = Object.entries(heatmapMap).map(([date, count]) => ({ date, count }));
-
-  const solvedProblems = await prisma.submission.findMany({
-    where: { userId, status: "ACCEPTED" },
-    select: { problem: { select: { tags: { include: { tag: true } } } } },
-  });
+  const heatmapData = Object.entries(heatmapMap).map(([date, count]) => ({
+    date,
+    count,
+  }));
 
   const topicMap = {};
   for (const s of solvedProblems) {
@@ -107,19 +148,25 @@ export async function getUserDashboard(userId) {
     }
   }
 
-  const allTags = await prisma.tag.findMany();
-  const topicProgress = allTags.map((tag) => {
-    const solved = topicMap[tag.name] || 0;
-    const total = 0;
-    return {
-      topic: tag.name,
-      solved,
-      total: Math.max(solved, 5),
-      percentage: Math.min(100, Math.round((solved / Math.max(solved, 5)) * 100)),
-    };
-  }).filter((t) => t.solved > 0).slice(0, 8);
+  const topicProgress = allTags
+    .map((tag) => {
+      const solved = topicMap[tag.name] || 0;
+      const total = 0; // Keeping your existing logic
+      return {
+        topic: tag.name,
+        solved,
+        total: Math.max(solved, 5),
+        percentage: Math.min(
+          100,
+          Math.round((solved / Math.max(solved, 5)) * 100),
+        ),
+      };
+    })
+    .filter((t) => t.solved > 0)
+    .slice(0, 8);
 
-  return {
+  // 5. Construct the final payload
+  const result = {
     user: {
       id: user.id,
       username: user.username,
@@ -139,35 +186,65 @@ export async function getUserDashboard(userId) {
       slug: s.problem.slug,
       status: s.status,
       language: s.language,
-      runtime: s.runtime ? `${s.runtime} ms` : "—",
+      runtime: s.runtime ? `${s.runtime} ms` : "--",
       date: s.createdAt,
     })),
     duelHistory: duels.map((d) => {
       const opponent = d.match.participants.find((p) => p.userId !== userId);
       const won = d.match.winnerId === userId;
-      const ratingChange = d.ratingAfter != null ? d.ratingAfter - d.ratingBefore : 0;
+      const ratingChange =
+        d.ratingAfter != null ? d.ratingAfter - d.ratingBefore : 0;
       return {
         id: d.matchId,
         opponent: opponent?.user.username || "Unknown",
         topic: d.match.config?.topic || "General",
         result: won ? "WIN" : d.match.status === "FINISHED" ? "LOSS" : "DRAW",
-        ratingChange: ratingChange >= 0 ? `+${ratingChange}` : `${ratingChange}`,
+        ratingChange:
+          ratingChange >= 0 ? `+${ratingChange}` : `${ratingChange}`,
         date: d.joinedAt,
       };
     }),
     heatmapData,
     topicProgress,
   };
+
+  // 6. Save payload to Redis Cache
+  if (redis) {
+    try {
+      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
+    } catch (err) {
+      console.warn("Redis set error:", err.message);
+    }
+  }
+
+  return result;
 }
 
 export async function getUserProfile(userId) {
+  const redis = getRedis();
+  const cacheKey = `profile:${userId}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (err) {}
+  }
   const dashboard = await getUserDashboard(userId);
   const leaderboard = await getLeaderboard(10);
-  return {
+  const result = {
     ...dashboard,
     leaderboard: leaderboard.map((entry) => ({
       ...entry,
       isCurrentUser: entry.userId === userId,
     })),
   };
+
+  if (redis) {
+    try {
+      await redis.setex(cacheKey, 300, JSON.stringify(result));
+    } catch (e) {}
+  }
+
+  return result;
 }

@@ -52,6 +52,7 @@ export const problemsApi = {
 export const submissionsApi = {
   run: (body) => request("/submissions/run", { method: "POST", body: JSON.stringify(body) }),
   submit: (body) => request("/submissions", { method: "POST", body: JSON.stringify(body) }),
+  listMine: (limit = 50) => request(`/submissions?limit=${limit}`),
   get: (id) => request(`/submissions/${id}`),
 };
 
