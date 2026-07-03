@@ -1,28 +1,11 @@
 version: '3.9'
 
 services:
-  postgres:
-    image: postgres:16
-    container_name: codearena-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: codearena
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d codearena"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   redis:
-    image: redis:7-alpine
+    image: redis:7
     container_name: codearena-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     command: ["redis-server", "--appendonly", "yes"]
@@ -36,7 +19,7 @@ services:
     ports:
       - "2181:2181"
 
- kafka:
+  kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: codearena-kafka
     depends_on:

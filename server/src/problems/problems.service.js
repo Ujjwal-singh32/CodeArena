@@ -1,68 +1,110 @@
 import prisma from "../config/db.js";
 import { getRedis } from "../config/redis.js";
 import { AppError } from "../utils/AppError.js";
-import { DEFAULT_BOILERPLATES, ALL_CLIENT_LANGUAGES } from "./defaultBoilerplates.js";
+import {
+  DEFAULT_BOILERPLATES,
+  ALL_CLIENT_LANGUAGES,
+} from "./defaultBoilerplates.js";
 
 const CACHE_TTL = 300;
 
-export async function listProblems({ difficulty, tag, search, page = 1, limit = 20 }) {
+// src/problems/problems.service.js
+
+export async function listProblems({
+  userId,
+  difficulty,
+  tag,
+  search,
+  page = 1,
+  limit = 20,
+}) {
   const cacheKey = `problems:${difficulty || ""}:${tag || ""}:${search || ""}:${page}:${limit}`;
   const redis = getRedis();
+
+  let result;
+  let fromCache = false;
 
   if (redis) {
     try {
       const cached = await redis.get(cacheKey);
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        result = JSON.parse(cached);
+        fromCache = true;
+      }
     } catch {}
   }
 
-  const where = { isPublished: true };
-  if (difficulty) where.difficulty = difficulty;
-  if (search) {
-    where.OR = [
-      { title: { contains: search, mode: "insensitive" } },
-      { slug: { contains: search, mode: "insensitive" } },
-    ];
+  if (!fromCache) {
+    const where = { isPublished: true };
+    if (difficulty) where.difficulty = difficulty;
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: "insensitive" } },
+        { slug: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const [problems, total] = await Promise.all([
+      prisma.problem.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          difficulty: true,
+          submissionCount: true,
+          acceptedCount: true,
+          tags: { include: { tag: true } },
+          categories: { include: { category: true } },
+        },
+        orderBy: { id: "asc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.problem.count({ where }),
+    ]);
+
+    let filtered = problems;
+    if (tag) {
+      filtered = problems.filter((p) =>
+        p.tags.some((t) => t.tag.name.toLowerCase() === tag.toLowerCase()),
+      );
+    }
+
+    result = {
+      problems: filtered.map(formatProblemListItem),
+      total,
+      page,
+      limit,
+    };
+
+    if (redis) {
+      try {
+        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
+      } catch {}
+    }
   }
 
-  const [problems, total] = await Promise.all([
-    prisma.problem.findMany({
-      where,
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        difficulty: true,
-        submissionCount: true,
-        acceptedCount: true,
-        tags: { include: { tag: true } },
-        categories: { include: { category: true } },
-      },
-      orderBy: { id: "asc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    prisma.problem.count({ where }),
-  ]);
+  // Inject user-specific "solved" status dynamically
+  if (userId) {
+    const solvedSubmissions = await prisma.submission.findMany({
+      where: { userId, status: "ACCEPTED" },
+      select: { problemId: true },
+      distinct: ["problemId"],
+    });
 
-  let filtered = problems;
-  if (tag) {
-    filtered = problems.filter((p) =>
-      p.tags.some((t) => t.tag.name.toLowerCase() === tag.toLowerCase())
-    );
-  }
+    const solvedIds = new Set(solvedSubmissions.map((s) => s.problemId));
 
-  const result = {
-    problems: filtered.map(formatProblemListItem),
-    total,
-    page,
-    limit,
-  };
-
-  if (redis) {
-    try {
-      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
-    } catch {}
+    result.problems = result.problems.map((p) => ({
+      ...p,
+      solved: solvedIds.has(Number(p.id)),
+    }));
+  } else {
+    // Default to false for guests
+    result.problems = result.problems.map((p) => ({
+      ...p,
+      solved: false,
+    }));
   }
 
   return result;

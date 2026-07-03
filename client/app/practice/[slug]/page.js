@@ -115,7 +115,7 @@ export default function ProblemPage() {
     setOutput("Running against sample test cases...");
     setRuntime(null);
     setMemory(null);
-
+    console.log("Running code:", { problemId: parseInt(problem.id, 10)});
     try {
       const result = await submissionsApi.run({
         code,

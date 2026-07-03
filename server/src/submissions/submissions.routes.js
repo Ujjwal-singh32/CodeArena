@@ -7,6 +7,7 @@ const router = Router();
 router.use(authMiddleware);
 router.post("/run", requireAuth, requireVerified, submissionsController.run);
 router.post("/", requireAuth, requireVerified, submissionsController.submit);
+router.get("/", requireAuth, submissionsController.listMine);
 router.get("/:id", requireAuth, requireVerified, submissionsController.getById);
 
 export default router;
