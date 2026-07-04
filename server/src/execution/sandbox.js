@@ -314,7 +314,7 @@ const JUDGE0_API_URL = process.env.JUDGE0_API_URL || "http://localhost:2358";
 
 // Judge0 Language IDs
 const LANGUAGE_IDS = {
-  javascript: 93, // Node.js
+  javascript: 63, // Node.js
   python: 71,     // Python 3.8.1
   cpp: 54,        // GCC 9.2.0 C++
   c: 50,          // GCC 9.2.0 C
