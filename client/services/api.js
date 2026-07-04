@@ -74,10 +74,7 @@ export const duelApi = {
   submitConfig: (matchId, body) =>
     request(`/duel/matches/${matchId}/config`, { method: "POST", body: JSON.stringify(body) }),
   start: (matchId) => request(`/duel/matches/${matchId}/start`, { method: "POST" }),
-  findMatch: async () => {
-    const res = await api.post('/duel/matches/find');
-    return res.data;
-  }
+  findMatch: () => request("/duel/matches/find", { method: "POST" })
 };
 
 export const collabApi = {
