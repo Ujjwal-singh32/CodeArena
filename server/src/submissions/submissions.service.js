@@ -132,6 +132,7 @@ export async function processSubmissionJob(data) {
       totalTestCases: verdict.totalTestCases,
     },
   });
+
   const previouslySolved = await prisma.submission.findFirst({
     where: {
       userId,
@@ -142,7 +143,7 @@ export async function processSubmissionJob(data) {
   });
 
   if (verdict.status === "ACCEPTED") {
-    // Only increment the user's solved count if this is their first time getting ACCEPTED
+    // 1. Update User Stats: Only increment if this is their first time getting ACCEPTED
     if (!previouslySolved) {
       await prisma.user.update({
         where: { id: userId },
@@ -150,38 +151,13 @@ export async function processSubmissionJob(data) {
       });
     }
 
-    // Always increment the problem's global accepted count
-    await prisma.problem.update({
-      where: { id: problemId },
-      data: { acceptedCount: { increment: 1 } },
-    });
-  }
-
-  await prisma.problem.update({
-    where: { id: problemId },
-    data: { submissionCount: { increment: 1 } },
-  });
-
-  await publishEvent("submission.completed", {
-    event: "submission.completed",
-    submissionId,
-    userId,
-    problemId,
-    status: verdict.status,
-  });
-
-  if (verdict.status === "ACCEPTED") {
-    // A. Update general stats
-    await prisma.user.update({
-      where: { id: userId },
-      data: { solvedCount: { increment: 1 } },
-    });
+    // 2. Update Problem Stats: Always increment global accepted count
     await prisma.problem.update({
       where: { id: problemId },
       data: { acceptedCount: { increment: 1 } },
     });
 
-    // B. DUEL LOGIC: If this submission belongs to a running match, end it!
+    // 3. DUEL LOGIC: If this submission belongs to a running match, end it!
     if (submission.matchId) {
       const match = await prisma.match.findUnique({ 
         where: { id: submission.matchId } 
@@ -198,8 +174,24 @@ export async function processSubmissionJob(data) {
         });
       }
     }
+
+    // 4. Trigger AI Review
     await addAiReviewJob({ submissionId });
   }
+
+  // Always update global submission count
+  await prisma.problem.update({
+    where: { id: problemId },
+    data: { submissionCount: { increment: 1 } },
+  });
+
+  await publishEvent("submission.completed", {
+    event: "submission.completed",
+    submissionId,
+    userId,
+    problemId,
+    status: verdict.status,
+  });
 
   const redis = getRedis();
   if (redis) {
@@ -217,7 +209,6 @@ export async function processSubmissionJob(data) {
   }
   return { submission, verdict: formatVerdict(verdict) };
 }
-
 export async function getSubmission(id, userId) {
   const redis = getRedis();
   const cacheKey = `submission:${id}:${userId}`;
