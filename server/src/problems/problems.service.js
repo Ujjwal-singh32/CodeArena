@@ -110,7 +110,42 @@ export async function listProblems({
   return result;
 }
 
+// export async function getProblemBySlug(slug) {
+//   const problem = await prisma.problem.findUnique({
+//     where: { slug },
+//     include: {
+//       examples: { orderBy: { order: "asc" } },
+//       boilerplates: true,
+//       tags: { include: { tag: true } },
+//       categories: { include: { category: true } },
+//       testCases: { where: { isSample: true } },
+//     },
+//   });
+
+//   if (!problem || !problem.isPublished) {
+//     throw new AppError("Problem not found", 404);
+//   }
+
+//   return formatProblemDetail(problem);
+// }
+
 export async function getProblemBySlug(slug) {
+  const cacheKey = `problem:slug:${slug}`;
+  const redis = getRedis();
+
+  // 1. Try to fetch from Redis Cache first
+  if (redis) {
+    try {
+      const cachedProblem = await redis.get(cacheKey);
+      if (cachedProblem) {
+        return JSON.parse(cachedProblem); // Return cached formatted data instantly
+      }
+    } catch (err) {
+      console.warn("Redis cache read error in getProblemBySlug:", err.message);
+    }
+  }
+
+  // 2. Cache Miss: Fetch from Database
   const problem = await prisma.problem.findUnique({
     where: { slug },
     include: {
@@ -126,9 +161,21 @@ export async function getProblemBySlug(slug) {
     throw new AppError("Problem not found", 404);
   }
 
-  return formatProblemDetail(problem);
-}
+  // Format the problem details for the client
+  const formattedProblem = formatProblemDetail(problem);
 
+  // 3. Save the formatted result back to Redis for future clicks
+  if (redis) {
+    try {
+      // Caching for 1 hour (3600 seconds). You can adjust this time.
+      await redis.setex(cacheKey, 3600, JSON.stringify(formattedProblem));
+    } catch (err) {
+      console.warn("Redis cache write error in getProblemBySlug:", err.message);
+    }
+  }
+
+  return formattedProblem;
+}
 function formatProblemListItem(p) {
   const acceptance =
     p.submissionCount > 0
