@@ -171,8 +171,36 @@ export async function processSubmissionJob(data) {
   });
 
   if (verdict.status === "ACCEPTED") {
+    // A. Update general stats
+    await prisma.user.update({
+      where: { id: userId },
+      data: { solvedCount: { increment: 1 } },
+    });
+    await prisma.problem.update({
+      where: { id: problemId },
+      data: { acceptedCount: { increment: 1 } },
+    });
+
+    // B. DUEL LOGIC: If this submission belongs to a running match, end it!
+    if (submission.matchId) {
+      const match = await prisma.match.findUnique({ 
+        where: { id: submission.matchId } 
+      });
+      
+      if (match && match.status === "RUNNING") {
+        const finishedMatch = await finishMatch(submission.matchId, userId);
+        
+        // Broadcast the win to both players instantly
+        getIo()?.to(`duel:${submission.matchId}`).emit("duel:finished", { 
+          matchId: submission.matchId, 
+          winnerId: userId, 
+          match: finishedMatch 
+        });
+      }
+    }
     await addAiReviewJob({ submissionId });
   }
+
   const redis = getRedis();
   if (redis) {
     try {

@@ -12,5 +12,6 @@ router.get("/matches/:id", duelController.get);
 router.post("/matches/:id/join", duelController.join);
 router.post("/matches/:id/config", duelController.submitConfig);
 router.post("/matches/:id/start", duelController.start);
+router.post("/matches/find", duelController.findOpponent);
 
 export default router;

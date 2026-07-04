@@ -52,6 +52,7 @@ export default function DuelLobbyPage() {
   const [tab, setTab] = useState("join");
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(null);
+  const [isSearching, setIsSearching] = useState(false); // NEW: State for Auto-Matchmaking
   const [games, setGames] = useState([]);
   const [duelHistory, setDuelHistory] = useState([]);
   const [filters, setFilters] = useState({
@@ -85,7 +86,7 @@ export default function DuelLobbyPage() {
       .then((res) => {
         if (res.matches?.length) setGames(res.matches);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [filters]);
 
   const filteredGames = games.filter((g) => {
@@ -104,8 +105,20 @@ export default function DuelLobbyPage() {
       if (filters.rating === "1600-2000" && (r < 1600 || r >= 2000)) return false;
       if (filters.rating === "2000+" && r < 2000) return false;
     }
-    return g.status === "WAITING" && (g.playerCount || 1) < 2;
+    return true;
   });
+
+  // NEW: The Auto-Matchmaking Handler
+  const handleFindOpponent = async () => {
+    setIsSearching(true);
+    try {
+      const res = await duelApi.findMatch(); // Ensure you added this to services/api.js
+      router.push(`/duel/room/${res.match.id}`);
+    } catch (error) {
+      console.error("Failed to find match:", error);
+      setIsSearching(false);
+    }
+  };
 
   const handleCreate = async () => {
     setCreating(true);
@@ -144,16 +157,34 @@ export default function DuelLobbyPage() {
           1v1 Coding Duel
         </h1>
         <p className="text-muted">
-          Create a game and wait for an opponent, or join an open room. Only 2 players per room.
+          Find a random opponent, create a game, or join an open room. First to solve wins!
         </p>
       </motion.div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+
+          {/* NEW: Massive Find Opponent Button */}
+          <Card glow className="p-6 text-center border-primary/30">
+            <h2 className="text-xl font-bold mb-4">Quick Match</h2>
+            <Button
+              size="lg"
+              className="w-full sm:w-2/3 mx-auto text-lg py-6"
+              onClick={handleFindOpponent}
+              disabled={isSearching}
+            >
+              {isSearching ? (
+                <><Loader2 className="w-6 h-6 mr-2 animate-spin" /> Searching for Opponent...</>
+              ) : (
+                <><Swords className="w-6 h-6 mr-2" /> Find Opponent</>
+              )}
+            </Button>
+          </Card>
+
           <Tabs
             tabs={[
-              { id: "join", label: "Join Game" },
-              { id: "create", label: "Create Game" },
+              { id: "join", label: "Custom Lobbies" },
+              { id: "create", label: "Create Custom" },
             ]}
             activeTab={tab}
             onChange={setTab}
@@ -162,7 +193,7 @@ export default function DuelLobbyPage() {
           {tab === "create" && (
             <Card glow>
               <CardHeader>
-                <CardTitle>Create a Duel</CardTitle>
+                <CardTitle>Create a Custom Duel</CardTitle>
               </CardHeader>
               <div className="space-y-4">
                 <Input
@@ -207,13 +238,11 @@ export default function DuelLobbyPage() {
                 <Button className="w-full" onClick={handleCreate} disabled={creating}>
                   {creating ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Publishing...
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...
                     </>
                   ) : (
                     <>
-                      <Plus className="w-4 h-4" />
-                      Publish Game
+                      <Plus className="w-4 h-4 mr-2" /> Publish Game
                     </>
                   )}
                 </Button>
@@ -227,7 +256,7 @@ export default function DuelLobbyPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Filter className="w-4 h-4" />
-                    Filter Games
+                    Filter Custom Games
                   </CardTitle>
                 </CardHeader>
                 <div className="grid sm:grid-cols-2 gap-4">
@@ -265,12 +294,27 @@ export default function DuelLobbyPage() {
                 ) : (
                   filteredGames.map((game) => {
                     const diff = formatDifficulty(game.difficulty);
+
+                    // Calculate accurate status
+                    const isFull = (game.playerCount || game.participants?.length || 1) >= 2;
+                    const isFinished = game.status === "FINISHED";
+                    const isRunning = game.status === "RUNNING";
+                    const canJoin = game.status === "WAITING" && !isFull;
+
+                    // Determine the text to show inside the badge
+                    let statusText = game.status;
+                    if (game.status === "WAITING" && isFull) statusText = "FULL";
+
                     return (
                       <Card key={game.id} className="flex items-center justify-between gap-4">
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <h3 className="font-semibold">{game.title || `${game.topic} Duel`}</h3>
                             <Badge variant={game.difficulty}>{diff.label}</Badge>
+                            {/* NEW: Status Badge */}
+                            <Badge variant={canJoin ? "ACTIVE" : "DISABLED"}>
+                              {statusText}
+                            </Badge>
                           </div>
                           <p className="text-xs text-muted">
                             by {game.creator} · Rating {game.creatorRating} · {game.topic} · {game.duration} min
@@ -280,13 +324,19 @@ export default function DuelLobbyPage() {
                             {game.playerCount || 1}/2 players
                           </div>
                         </div>
+
+                        {/* UPDATED: Dynamic Button Status */}
                         <Button
                           size="sm"
                           onClick={() => handleJoin(game.id)}
-                          disabled={joining === game.id}
+                          disabled={joining === game.id || !canJoin}
                         >
                           {joining === game.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : isFinished ? (
+                            "Ended"
+                          ) : isRunning || isFull ? (
+                            "In Progress"
                           ) : (
                             "Join"
                           )}
@@ -319,20 +369,24 @@ export default function DuelLobbyPage() {
               </CardTitle>
             </CardHeader>
             <div className="space-y-3">
-              {duelHistory.map((duel) => (
-                <div key={duel.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-                  <div>
-                    <p className="text-sm font-medium">vs {duel.opponent}</p>
-                    <p className="text-xs text-muted">{duel.topic} · {duel.date}</p>
+              {duelHistory.length === 0 ? (
+                <p className="text-sm text-muted text-center py-4">No recent duels.</p>
+              ) : (
+                duelHistory.map((duel) => (
+                  <div key={duel.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                    <div>
+                      <p className="text-sm font-medium">vs {duel.opponent}</p>
+                      <p className="text-xs text-muted">{duel.topic} · {duel.date}</p>
+                    </div>
+                    <div className="text-right">
+                      <Badge variant={duel.result}>{duel.result}</Badge>
+                      <p className={`text-xs mt-1 ${duel.result === "WIN" ? "text-primary" : "text-danger"}`}>
+                        {duel.ratingChange}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <Badge variant={duel.result}>{duel.result}</Badge>
-                    <p className={`text-xs mt-1 ${duel.result === "WIN" ? "text-primary" : "text-danger"}`}>
-                      {duel.ratingChange}
-                    </p>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </Card>
         </div>

@@ -108,12 +108,60 @@ export function setupSockets(io) {
       io.to(`duel:${matchId}`).emit("duel:started", { matchId });
     });
 
-    socket.on("duel:submit-win", async ({ matchId, winnerId }) => {
+    socket.on("duel:forfeit", async ({ matchId, userId }) => {
       try {
-        const match = await finishMatch(parseInt(matchId, 10), winnerId);
-        io.to(`duel:${matchId}`).emit("duel:finished", { matchId, winnerId, match });
+        // Find the match and its participants
+        const match = await prisma.match.findUnique({ 
+          where: { id: parseInt(matchId, 10) }, 
+          include: { participants: true } 
+        });
+        
+        if (!match || match.status !== "RUNNING") return;
+
+        // The winner is the person who did NOT forfeit
+        const opponent = match.participants.find(p => p.userId !== userId);
+        const winnerId = opponent ? opponent.userId : userId; 
+
+        // Finish the match and calculate ELO
+        const finishedMatch = await finishMatch(parseInt(matchId, 10), winnerId);
+        
+        // Broadcast the finish event to everyone in the room
+        io.to(`duel:${matchId}`).emit("duel:finished", { 
+          matchId, 
+          winnerId, 
+          match: finishedMatch 
+        });
       } catch (err) {
-        console.error("duel:submit-win error:", err.message);
+        console.error("duel:forfeit error:", err.message);
+      }
+    });
+
+    socket.on("duel:claim-victory", async ({ matchId, userId }) => {
+      try {
+        const mId = parseInt(matchId, 10);
+        
+        // SECURITY CHECK: Did this user actually get an ACCEPTED submission for this match?
+        const acceptedSub = await prisma.submission.findFirst({
+          where: { 
+            matchId: mId, 
+            userId: userId, 
+            status: "ACCEPTED" 
+          }
+        });
+
+        if (acceptedSub) {
+          // They genuinely passed. Finish the match and distribute ELO.
+          const finishedMatch = await finishMatch(mId, userId);
+          
+          // Broadcast to both players that the match is over
+          io.to(`duel:${matchId}`).emit("duel:finished", { 
+            matchId, 
+            winnerId: userId, 
+            match: finishedMatch 
+          });
+        }
+      } catch (err) {
+        console.error("duel:claim-victory error:", err.message);
       }
     });
 

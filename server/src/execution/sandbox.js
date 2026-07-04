@@ -6,7 +6,21 @@
 // import { env } from "../config/env.js";
 
 // const isWin = process.platform === "win32";
-// const BIN = isWin ? "main.exe" : "./main";
+
+// function normalizeOutput(s) {
+//   return (s || "").trim().replace(/\r\n/g, "\n");
+// }
+
+// function getDockerSafePath(pathString) {
+//   return pathString.replace(/\\/g, "/");
+// }
+
+// function getExecutionRoot() {
+//   if (env.execution.enabled) {
+//     return join(process.cwd(), ".sandbox-exec");
+//   }
+//   return tmpdir();
+// }
 
 // function getLangConfig(language) {
 //   const configs = {
@@ -47,18 +61,42 @@
 //       dockerRun: "java Main",
 //     },
 //   };
-//   return configs[language] || configs.javascript;
+
+//   return configs[language.toLowerCase()] || configs.javascript;
 // }
 
-// export async function executeCode({ code, language, input, timeLimitSec = 2, memoryLimitMb = 256 }) {
-//   if (env.execution.enabled) {
-//     const dockerResult = await executeInDocker({ code, language, input, timeLimitSec, memoryLimitMb });
-//     if (isDockerUnavailable(dockerResult)) {
-//       return executeLocally({ code, language, input, timeLimitSec });
-//     }
-//     return dockerResult;
-//   }
-//   return executeLocally({ code, language, input, timeLimitSec });
+// function runProcess(cmd, cwd, stdin = "", timeoutMs = 5000) {
+//   return new Promise((resolve) => {
+//     const proc = spawn(cmd[0], cmd.slice(1), { cwd, shell: false });
+//     let stdout = "";
+//     let stderr = "";
+//     let timedOut = false;
+
+//     const timer = setTimeout(() => {
+//       timedOut = true;
+//       proc.kill("SIGKILL");
+//     }, timeoutMs);
+
+//     proc.stdout?.on("data", (chunk) => {
+//       stdout += chunk.toString();
+//     });
+//     proc.stderr?.on("data", (chunk) => {
+//       stderr += chunk.toString();
+//     });
+
+//     if (stdin) proc.stdin?.write(stdin);
+//     proc.stdin?.end();
+
+//     proc.on("close", (exitCode) => {
+//       clearTimeout(timer);
+//       resolve({ stdout, stderr, exitCode: exitCode ?? 1, timedOut });
+//     });
+
+//     proc.on("error", (err) => {
+//       clearTimeout(timer);
+//       resolve({ stdout, stderr: err.message, exitCode: 1, timedOut });
+//     });
+//   });
 // }
 
 // function isDockerUnavailable(result) {
@@ -68,7 +106,10 @@
 //     (err.includes("cannot find the file") ||
 //       err.includes("failed to connect") ||
 //       err.includes("not found") ||
-//       err.includes("daemon"))
+//       err.includes("daemon") ||
+//       err.includes("bind source path does not exist") ||
+//       err.includes("invalid mount config") ||
+//       err.includes("invalid volume specification"))
 //   );
 // }
 
@@ -120,7 +161,7 @@
 
 // async function executeInDocker({ code, language, input, timeLimitSec, memoryLimitMb }) {
 //   const config = getLangConfig(language);
-//   const workDir = join(tmpdir(), `codearena-docker-${randomUUID()}`);
+//   const workDir = join(getExecutionRoot(), `codearena-docker-${randomUUID()}`);
 
 //   try {
 //     await mkdir(workDir, { recursive: true });
@@ -131,6 +172,7 @@
 //       ? `${config.dockerCompile} 2>&1 && ${config.dockerRun} < input.txt`
 //       : `${config.dockerRun} < input.txt`;
 
+//     const hostWorkDir = getDockerSafePath(workDir);
 //     const dockerArgs = [
 //       "run",
 //       "--rm",
@@ -143,7 +185,7 @@
 //       "-w",
 //       "/sandbox",
 //       "-v",
-//       `${workDir}:/sandbox`,
+//       `${hostWorkDir}:/sandbox`,
 //       env.execution.sandboxImage,
 //       "sh",
 //       "-c",
@@ -156,12 +198,18 @@
 
 //     const combinedErr = result.stderr || "";
 //     const combinedOut = result.stdout || "";
+//     const combinedText = `${combinedErr}\n${combinedOut}`.toLowerCase();
 
 //     if (result.timedOut) {
 //       return { status: "TIME_LIMIT_EXCEEDED", stdout: combinedOut, stderr: combinedErr, runtime, memory: 0 };
 //     }
 
-//     if (config.compile && (combinedErr.includes("error:") || combinedOut.includes("error:")) && result.exitCode !== 0) {
+//     const dockerStartupError = /docker: error response|unable to find image|cannot connect to the docker daemon|failed to create shim task|bind source path does not exist|invalid mount config|invalid volume specification|error response from daemon|no such file or directory/;
+//     if (dockerStartupError.test(combinedText) && result.exitCode !== 0) {
+//       return { status: "RUNTIME_ERROR", stdout: combinedOut, stderr: combinedErr, runtime, memory: 0 };
+//     }
+
+//     if (config.compile && result.exitCode !== 0) {
 //       return {
 //         status: "COMPILATION_ERROR",
 //         compileOutput: combinedErr || combinedOut,
@@ -188,41 +236,18 @@
 //   }
 // }
 
-// function runProcess(cmd, cwd, stdin = "", timeoutMs = 5000) {
-//   return new Promise((resolve) => {
-//     const proc = spawn(cmd[0], cmd.slice(1), { cwd, shell: false });
-//     let stdout = "";
-//     let stderr = "";
-//     let timedOut = false;
-
-//     const timer = setTimeout(() => {
-//       timedOut = true;
-//       proc.kill("SIGKILL");
-//     }, timeoutMs);
-
-//     proc.stdout?.on("data", (d) => {
-//       stdout += d.toString();
-//     });
-//     proc.stderr?.on("data", (d) => {
-//       stderr += d.toString();
-//     });
-
-//     if (stdin) proc.stdin?.write(stdin);
-//     proc.stdin?.end();
-
-//     proc.on("close", (exitCode) => {
-//       clearTimeout(timer);
-//       resolve({ stdout, stderr, exitCode: exitCode ?? 1, timedOut });
-//     });
-
-//     proc.on("error", (err) => {
-//       clearTimeout(timer);
-//       resolve({ stdout, stderr: err.message, exitCode: 1, timedOut });
-//     });
-//   });
+// async function executeCode({ code, language, input, timeLimitSec = 2, memoryLimitMb = 256 }) {
+//   if (env.execution.enabled) {
+//     const dockerResult = await executeInDocker({ code, language, input, timeLimitSec, memoryLimitMb });
+//     if (isDockerUnavailable(dockerResult)) {
+//       return executeLocally({ code, language, input, timeLimitSec });
+//     }
+//     return dockerResult;
+//   }
+//   return executeLocally({ code, language, input, timeLimitSec });
 // }
 
-// export async function judgeSubmission({ code, language, testCases, timeLimitSec, memoryLimitMb }) {
+// export async function judgeSubmission({ code, language, testCases, timeLimitSec = 2, memoryLimitMb = 256 }) {
 //   let passed = 0;
 //   let lastResult = null;
 
@@ -280,9 +305,8 @@
 //   };
 // }
 
-// function normalizeOutput(s) {
-//   return (s || "").trim().replace(/\r\n/g, "\n");
-// }
+
+
 import fetch from "node-fetch";
 
 // Defaulting to a local Judge0 instance or your hosted URL
