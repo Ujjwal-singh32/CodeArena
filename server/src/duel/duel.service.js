@@ -1,7 +1,6 @@
 import prisma from "../config/db.js";
 import { AppError } from "../utils/AppError.js";
 import { addEmailJob } from "../queues/index.js";
-import { publishEvent } from "../config/kafka.js";
 import { selectDuelProblem } from "../ai/ai.service.js";
 import { getIo } from "../sockets/io.js";
 
@@ -49,7 +48,6 @@ export async function createMatch(userId, { topic, difficulty, questionCount, du
 
   const match = await prisma.match.create({
     data: {
-      title, // <-- ADD THIS LINE
       status: "WAITING",
       config: {
         create: {
@@ -72,7 +70,7 @@ export async function createMatch(userId, { topic, difficulty, questionCount, du
     },
   });
 
-  return formatMatch(match); // Remove the second argument here
+  return formatMatch(match,title); // Remove the second argument here
 }
 
 export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax }) {
@@ -264,8 +262,6 @@ export async function finishMatch(matchId, winnerId) {
       })
     ),
   ]);
-
-  await publishEvent("duel.ended", { event: "duel.ended", matchId, winnerId });
 
   for (const u of updates) {
     const participant = match.participants.find((p) => p.userId === u.userId);

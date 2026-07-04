@@ -3,10 +3,10 @@ import { AppError } from "../utils/AppError.js";
 import { clientToPrismaLang } from "../problems/problems.service.js";
 import { judgeSubmission } from "../execution/sandbox.js";
 import { addExecutionJob, addAiReviewJob } from "../queues/index.js";
-import { publishEvent } from "../config/kafka.js";
 import { formatJudgeOutput } from "../utils/judgeOutput.js";
 import { getRedis } from "../config/redis.js";
-
+import { finishMatch } from "../duel/duel.service.js";
+import { getIo } from "../sockets/io.js";
 function formatVerdict(verdict) {
   return {
     ...verdict,
@@ -184,15 +184,6 @@ export async function processSubmissionJob(data) {
     where: { id: problemId },
     data: { submissionCount: { increment: 1 } },
   });
-
-  await publishEvent("submission.completed", {
-    event: "submission.completed",
-    submissionId,
-    userId,
-    problemId,
-    status: verdict.status,
-  });
-
   const redis = getRedis();
   if (redis) {
     try {

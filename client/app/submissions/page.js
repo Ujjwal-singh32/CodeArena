@@ -1,15 +1,27 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Code2, Eye, X, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Code2,
+  Eye,
+  X,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Bot,
+  Code,
+} from "lucide-react";
 import Button from "@/components/ui/Button";
 import Card, { CardHeader, CardTitle } from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import { submissionsApi } from "@/services/api";
 import { formatDate } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
+import { useSocket } from "@/hooks/useSocket";
+import ReactMarkdown from "react-markdown";
 
 export default function SubmissionsPage() {
+  const { user } = useAuth();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,7 +32,18 @@ export default function SubmissionsPage() {
   // Modal state
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [fetchingCode, setFetchingCode] = useState(false);
-
+  const [modalTab, setModalTab] = useState("code");
+  useSocket(user?.id, {
+    "ai:review-ready": (payload) => {
+      setSelectedSubmission((prev) => {
+        // Ensure both IDs are compared as numbers to prevent mismatch failures
+        if (prev && Number(prev.id) === Number(payload.submissionId)) {
+          return { ...prev, aiReview: payload.review };
+        }
+        return prev;
+      });
+    },
+  });
   useEffect(() => {
     submissionsApi
       .listMine(50) // Fetch up to 50 recent submissions
@@ -31,6 +54,7 @@ export default function SubmissionsPage() {
 
   const handleViewSubmission = async (id) => {
     setFetchingCode(true);
+    setModalTab("code");
     setSelectedSubmission({ id, code: null }); // Open modal immediately with loading state
 
     try {
@@ -47,7 +71,10 @@ export default function SubmissionsPage() {
   // Pagination Logic
   const totalPages = Math.ceil(submissions.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const currentSubmissions = submissions.slice(startIndex, startIndex + itemsPerPage);
+  const currentSubmissions = submissions.slice(
+    startIndex,
+    startIndex + itemsPerPage,
+  );
 
   const handleNextPage = () => {
     setCurrentPage((prev) => Math.min(prev + 1, totalPages));
@@ -142,11 +169,19 @@ export default function SubmissionsPage() {
               <div className="flex items-center justify-between px-4 py-4 border-t border-border/50 sm:px-6 bg-card/50">
                 <div className="hidden sm:block">
                   <p className="text-sm text-muted">
-                    Showing <span className="font-medium text-foreground">{startIndex + 1}</span> to{" "}
+                    Showing{" "}
+                    <span className="font-medium text-foreground">
+                      {startIndex + 1}
+                    </span>{" "}
+                    to{" "}
                     <span className="font-medium text-foreground">
                       {Math.min(startIndex + itemsPerPage, submissions.length)}
                     </span>{" "}
-                    of <span className="font-medium text-foreground">{submissions.length}</span> entries
+                    of{" "}
+                    <span className="font-medium text-foreground">
+                      {submissions.length}
+                    </span>{" "}
+                    entries
                   </p>
                 </div>
                 <div className="flex flex-1 justify-between sm:justify-end gap-2">
@@ -206,23 +241,41 @@ export default function SubmissionsPage() {
                 flex flex-col
               "
             >
-              <div className="flex items-center justify-between px-7 py-5 border-b border-emerald-400/20 bg-black/20 backdrop-blur-xl">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    {selectedSubmission.problem?.title || "Loading..."}
-                  </h3>
-                  {selectedSubmission.language && (
-                    <span className="text-xs font-mono text-emerald-300 border border-emerald-400/25 bg-emerald-500/5 px-3 py-1 rounded-full tracking-wide">
-                      {selectedSubmission.language}
-                    </span>
-                  )}
+              <div className="flex flex-col border-b border-emerald-400/20 bg-black/40">
+                <div className="flex items-center justify-between px-7 py-5">
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">
+                      {selectedSubmission.problem?.title || "Loading..."}
+                    </h3>
+                    {selectedSubmission.language && (
+                      <span className="text-xs font-mono text-emerald-300 border border-emerald-400/25 bg-emerald-500/5 px-3 py-1 rounded-full tracking-wide">
+                        {selectedSubmission.language}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setSelectedSubmission(null)}
+                    className="p-2.5 rounded-full border border-emerald-400/15 bg-black/40 text-gray-400 hover:text-emerald-300 hover:border-emerald-400/40 transition-all duration-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setSelectedSubmission(null)}
-                  className="p-2.5 rounded-full border border-emerald-400/15 bg-black/40 text-gray-400 hover:text-emerald-300 hover:border-emerald-400/40 hover:bg-emerald-500/10 transition-all duration-300"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+
+                {/* NEW: Tabs UI */}
+                <div className="flex px-7 gap-6 border-t border-emerald-400/10 pt-2">
+                  <button
+                    onClick={() => setModalTab("code")}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${modalTab === "code" ? "border-primary text-primary" : "border-transparent text-muted hover:text-foreground"}`}
+                  >
+                    <Code className="w-4 h-4" /> Source Code
+                  </button>
+                  <button
+                    onClick={() => setModalTab("review")}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${modalTab === "review" ? "border-primary text-primary" : "border-transparent text-muted hover:text-foreground"}`}
+                  >
+                    <Bot className="w-4 h-4" /> AI Code Review
+                  </button>
+                </div>
               </div>
 
               <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
@@ -233,10 +286,82 @@ export default function SubmissionsPage() {
                       Decrypting submission...
                     </p>
                   </div>
-                ) : (
+                ) : modalTab === "code" ? (
                   <pre className="text-sm font-mono text-white bg-black/70 border border-emerald-500/25 rounded-2xl p-6 overflow-x-auto leading-7 shadow-[0_0_25px_rgba(34,197,94,0.08)]">
                     <code>{selectedSubmission.code}</code>
                   </pre>
+                ) : (
+                  /* NEW: AI Review Tab Content */
+                  <div className="text-foreground/90 bg-black/70 border border-emerald-500/25 rounded-2xl p-6 shadow-[0_0_25px_rgba(34,197,94,0.08)]">
+                    {selectedSubmission.aiReview ? (
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-card p-4 rounded-xl border border-border">
+                            <p className="text-xs text-muted mb-1 uppercase tracking-wider">
+                              Time Complexity
+                            </p>
+                            <p className="font-mono text-primary text-lg">
+                              {selectedSubmission.aiReview.timeComplexity}
+                            </p>
+                          </div>
+                          <div className="bg-card p-4 rounded-xl border border-border">
+                            <p className="text-xs text-muted mb-1 uppercase tracking-wider">
+                              Space Complexity
+                            </p>
+                            <p className="font-mono text-primary text-lg">
+                              {selectedSubmission.aiReview.spaceComplexity}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-sm font-semibold mb-3 text-emerald-300">
+                            Optimization Tips
+                          </h4>
+                          {/* Green-tinted safe box for formatting */}
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap font-sans text-emerald-50 bg-emerald-950/30 p-5 rounded-xl border border-emerald-500/20">
+                            <ReactMarkdown>
+                              {/* Fallback to JSON.stringify if the AI somehow bypasses the backend string check */}
+                              {typeof selectedSubmission.aiReview
+                                .optimizationTips === "string"
+                                ? selectedSubmission.aiReview.optimizationTips
+                                : JSON.stringify(
+                                    selectedSubmission.aiReview
+                                      .optimizationTips,
+                                    null,
+                                    2,
+                                  )}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      </div>
+                    ) : selectedSubmission.status === "ACCEPTED" ? (
+                      <div className="flex flex-col items-center justify-center py-12 gap-3">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                        <p className="text-emerald-300 text-sm tracking-wide">
+                          AI report is being generated...
+                        </p>
+                        <p className="text-xs text-muted">
+                          This usually takes about 5-10 seconds. It will appear
+                          here automatically.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                        <Bot className="w-10 h-10 text-muted/50" />
+                        <p className="text-muted">
+                          AI Reviews are only generated for{" "}
+                          <span className="text-primary font-medium">
+                            ACCEPTED
+                          </span>{" "}
+                          submissions.
+                        </p>
+                        <p className="text-xs text-muted/70">
+                          Solve the problem first to get feedback!
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </motion.div>
