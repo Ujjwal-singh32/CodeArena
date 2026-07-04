@@ -39,7 +39,7 @@ async function handleAiReviewJob(data, io) {
 export function startWorkers(io) {
   const executionProcessor = (data) => handleExecutionJob(data, io);
   const aiReviewProcessor = (data) => handleAiReviewJob(data, io);
-  const emailProcessor = async (data) => {
+  const emailProcessor = async (data) => {  
     if (data.type === "duel-result") {
       return sendDuelResultEmail(data.email, data);
     }
