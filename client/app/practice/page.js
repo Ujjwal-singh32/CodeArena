@@ -60,7 +60,7 @@ export default function PracticePage() {
 
     return result;
   }, [problems, search, difficulty, sortBy]);
-  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const paginatedProblems = filtered.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE,
@@ -125,8 +125,12 @@ export default function PracticePage() {
           ) : error ? (
             <div className="py-16 text-center text-danger">{error}</div>
           ) : filtered.length > 0 ? (
-            filtered.map((problem, i) => (
-              <ProblemRow key={problem.id} problem={problem} index={i} />
+            paginatedProblems.map((problem, i) => (
+              <ProblemRow
+                key={problem.id}
+                problem={problem}
+                index={(currentPage - 1) * ITEMS_PER_PAGE + i}
+              />
             ))
           ) : (
             <div className="py-16 text-center text-muted">
