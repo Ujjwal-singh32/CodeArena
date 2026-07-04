@@ -251,7 +251,7 @@ model Problem {
   /////////////////////////////////////////////////////////
 
   @@index([difficulty])
-
+  @@index([title])
   @@index([slug])
 
 }
@@ -536,6 +536,8 @@ model Notification {
 model Match {
 
   id                  Int      @id @default(autoincrement())
+
+  title        String?          
 
   status              MatchStatus @default(WAITING)
 

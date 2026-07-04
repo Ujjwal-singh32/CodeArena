@@ -49,6 +49,7 @@ export async function createMatch(userId, { topic, difficulty, questionCount, du
 
   const match = await prisma.match.create({
     data: {
+      title, // <-- ADD THIS LINE
       status: "WAITING",
       config: {
         create: {
@@ -71,15 +72,12 @@ export async function createMatch(userId, { topic, difficulty, questionCount, du
     },
   });
 
-  return formatMatch(match, title);
+  return formatMatch(match); // Remove the second argument here
 }
 
 export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax }) {
   const matches = await prisma.match.findMany({
-    where: {
-      status: "WAITING",
-      participants: { every: {} },
-    },
+    // REMOVED status: "WAITING" so we get all matches for the lobby history
     include: {
       config: true,
       participants: {
@@ -91,7 +89,7 @@ export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax 
   });
 
   return matches
-    .filter((m) => m.participants.length < 2)
+    // REMOVED .filter((m) => m.participants.length < 2)
     .filter((m) => !topic || m.config?.topic === topic)
     .filter((m) => !difficulty || m.config?.difficulty === difficulty)
     .filter((m) => {
@@ -101,6 +99,37 @@ export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax 
       return true;
     })
     .map((m) => formatMatch(m));
+}
+
+export async function handlePlayerLeave(matchId, userId) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { participants: true },
+  });
+  
+  if (!match) return;
+
+  if (match.status === "WAITING") {
+    // 1. If game hasn't started, remove them from the room
+    await prisma.matchParticipant.deleteMany({ 
+      where: { matchId, userId } 
+    });
+    
+    // If room is now empty, close it completely
+    const remainingPlayers = match.participants.filter(p => p.userId !== userId);
+    if (remainingPlayers.length === 0) {
+      await prisma.match.update({ 
+        where: { id: matchId }, 
+        data: { status: "CLOSED" } 
+      });
+    }
+  } else if (match.status === "RUNNING") {
+    // 2. If game is running and they leave, the opponent automatically wins
+    const opponent = match.participants.find(p => p.userId !== userId);
+    if (opponent) {
+      await finishMatch(matchId, opponent.userId);
+    }
+  }
 }
 
 export async function joinMatch(matchId, userId) {
@@ -270,11 +299,11 @@ function calculateElo(participants, winnerId) {
   ];
 }
 
-function formatMatch(match, title) {
-  const creator = match.participants[0]?.user;
+function formatMatch(match) {
+  const creator = match.participants?.[0]?.user;
   return {
     id: String(match.id),
-    title: title || `${match.config?.topic || "Open"} Duel`,
+    title: match.title || `${match.config?.topic || "Open"} Duel`, // <-- UPDATE THIS LINE
     creator: creator?.username || "unknown",
     creatorRating: creator?.rating || 1500,
     topic: match.config?.topic,
@@ -282,7 +311,7 @@ function formatMatch(match, title) {
     duration: match.config?.duration,
     questionCount: match.config?.questionCount,
     status: match.status,
-    playerCount: match.participants?.length || 1,
+    playerCount: match.participants?.length || 0,
   };
 }
 

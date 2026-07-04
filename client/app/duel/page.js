@@ -295,24 +295,42 @@ export default function DuelLobbyPage() {
                   filteredGames.map((game) => {
                     const diff = formatDifficulty(game.difficulty);
 
-                    // Calculate accurate status
-                    const isFull = (game.playerCount || game.participants?.length || 1) >= 2;
+                    // 1. Accurate Status Logic
+                    const playerCount = game.playerCount || 0;
+                    const isFull = playerCount >= 2;
+                    const isEmpty = playerCount === 0;
                     const isFinished = game.status === "FINISHED";
                     const isRunning = game.status === "RUNNING";
-                    const canJoin = game.status === "WAITING" && !isFull;
+                    const isClosed = game.status === "CLOSED" || isEmpty;
+                    const canJoin = game.status === "WAITING" && !isFull && !isClosed;
 
-                    // Determine the text to show inside the badge
+                    // 2. Determine Button Text & Badge
+                    let buttonText = "Join";
+                    let badgeStatus = "ACTIVE";
                     let statusText = game.status;
-                    if (game.status === "WAITING" && isFull) statusText = "FULL";
+
+                    if (joining === game.id) {
+                      buttonText = "Joining...";
+                    } else if (isFinished) {
+                      buttonText = "Ended";
+                      badgeStatus = "DEFAULT";
+                    } else if (isClosed) {
+                      buttonText = "Closed";
+                      statusText = "CLOSED";
+                      badgeStatus = "DISABLED";
+                    } else if (isRunning || isFull) {
+                      buttonText = "In Progress";
+                      statusText = isRunning ? "RUNNING" : "FULL";
+                      badgeStatus = "WARNING";
+                    }
 
                     return (
                       <Card key={game.id} className="flex items-center justify-between gap-4">
                         <div>
                           <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-semibold">{game.title || `${game.topic} Duel`}</h3>
+                            <h3 className="font-semibold">{game.title}</h3>
                             <Badge variant={game.difficulty}>{diff.label}</Badge>
-                            {/* NEW: Status Badge */}
-                            <Badge variant={canJoin ? "ACTIVE" : "DISABLED"}>
+                            <Badge variant={badgeStatus}>
                               {statusText}
                             </Badge>
                           </div>
@@ -321,24 +339,20 @@ export default function DuelLobbyPage() {
                           </p>
                           <div className="flex items-center gap-1 mt-2 text-xs text-muted">
                             <Users className="w-3 h-3" />
-                            {game.playerCount || 1}/2 players
+                            {playerCount}/2 players
                           </div>
                         </div>
 
-                        {/* UPDATED: Dynamic Button Status */}
                         <Button
                           size="sm"
                           onClick={() => handleJoin(game.id)}
-                          disabled={joining === game.id || !canJoin}
+                          disabled={!canJoin || joining === game.id}
+                          variant={canJoin ? "primary" : "outline"}
                         >
                           {joining === game.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : isFinished ? (
-                            "Ended"
-                          ) : isRunning || isFull ? (
-                            "In Progress"
                           ) : (
-                            "Join"
+                            buttonText
                           )}
                         </Button>
                       </Card>

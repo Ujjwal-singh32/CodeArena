@@ -8,6 +8,7 @@ import Tabs from "@/components/ui/Tabs";
 import Button from "@/components/ui/Button";
 import ProblemRow from "@/components/common/ProblemRow";
 import { problemsApi } from "@/services/api";
+import { useDebounce } from "@/hooks/useDebounce"; // Import the debounce hook
 
 const difficultyTabs = [
   { id: "all", label: "All" },
@@ -15,56 +16,65 @@ const difficultyTabs = [
   { id: "MEDIUM", label: "Medium" },
   { id: "HARD", label: "Hard" },
 ];
+
 const ITEMS_PER_PAGE = 8;
+
 export default function PracticePage() {
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  
+  // Search and Filter States
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 500); // 500ms delay
   const [difficulty, setDifficulty] = useState("all");
   const [sortBy, setSortBy] = useState("default");
+  
+  // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalProblems, setTotalProblems] = useState(0);
 
-  useEffect(() => {
-    problemsApi
-      .list({ limit: 100 })
-      .then((res) => setProblems(res.problems || []))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
-
+  // Reset to page 1 when search or difficulty changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, difficulty, sortBy]);
+  }, [debouncedSearch, difficulty]);
 
-  const filtered = useMemo(() => {
+  // Fetch from Backend using Debounced Search
+  useEffect(() => {
+    setLoading(true);
+    
+    // Build query parameters for the API
+    const params = {
+      limit: ITEMS_PER_PAGE,
+      page: currentPage,
+      ...(debouncedSearch && { search: debouncedSearch }),
+      ...(difficulty !== "all" && { difficulty }),
+    };
+
+    problemsApi
+      .list(params)
+      .then((res) => {
+        setProblems(res.problems || []);
+        setTotalProblems(res.total || 0); // Assuming your backend returns total count
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [debouncedSearch, difficulty, currentPage]);
+
+  // Client-side sorting for the current page of results
+  const sortedProblems = useMemo(() => {
     let result = [...problems];
-
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.tags.some((t) => t.toLowerCase().includes(q)),
-      );
-    }
-
-    if (difficulty !== "all") {
-      result = result.filter((p) => p.difficulty === difficulty);
-    }
-
-    if (sortBy === "acceptance")
+    if (sortBy === "acceptance") {
       result.sort((a, b) => b.acceptance - a.acceptance);
-    if (sortBy === "title")
+    }
+    if (sortBy === "title") {
       result.sort((a, b) => a.title.localeCompare(b.title));
-
+    }
     return result;
-  }, [problems, search, difficulty, sortBy]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
-  const paginatedProblems = filtered.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE,
-  );
+  }, [problems, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(totalProblems / ITEMS_PER_PAGE));
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <motion.div
@@ -75,8 +85,8 @@ export default function PracticePage() {
         <h1 className="text-3xl font-bold mb-2">Problems</h1>
         <p className="text-muted">
           {loading
-            ? "Loading problems..."
-            : `${filtered.length} problems available`}
+            ? "Searching problems..."
+            : `${totalProblems} problems available`}
         </p>
       </motion.div>
 
@@ -124,8 +134,8 @@ export default function PracticePage() {
             <div className="py-16 text-center text-muted">Loading...</div>
           ) : error ? (
             <div className="py-16 text-center text-danger">{error}</div>
-          ) : filtered.length > 0 ? (
-            paginatedProblems.map((problem, i) => (
+          ) : sortedProblems.length > 0 ? (
+            sortedProblems.map((problem, i) => (
               <ProblemRow
                 key={problem.id}
                 problem={problem}
@@ -139,13 +149,14 @@ export default function PracticePage() {
             </div>
           )}
         </div>
+
         {/* Pagination Controls */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-card/50">
             <Button
               variant="outline"
               size="sm"
-              disabled={currentPage === 1}
+              disabled={currentPage === 1 || loading}
               onClick={() => setCurrentPage((p) => p - 1)}
             >
               <ChevronLeft className="w-4 h-4 mr-1" />
@@ -158,7 +169,7 @@ export default function PracticePage() {
             <Button
               variant="outline"
               size="sm"
-              disabled={currentPage === totalPages}
+              disabled={currentPage === totalPages || loading}
               onClick={() => setCurrentPage((p) => p + 1)}
             >
               Next
