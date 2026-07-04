@@ -12,6 +12,7 @@ import {
   Lock,
   User,
   Swords,
+  Trophy, // NEW: Imported Trophy for the Win Modal
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -54,6 +55,14 @@ export default function DuelRoomPage() {
   const [output, setOutput] = useState("");
   const [outputStatus, setOutputStatus] = useState("idle");
   const [running, setRunning] = useState(false);
+  const [winnerId, setWinnerId] = useState(null); // NEW: State to track who won
+
+  const participants = match?.participants || [];
+  const me = participants.find((p) => p.id === user?.id);
+  const opponent = participants.find((p) => p.id !== user?.id);
+  const opponentReady = opponent ? readyPlayers.has(opponent.id) : false;
+  const isLocked = myReady && opponentReady;
+  const problem = match?.config?.problem;
 
   const applyMatch = useCallback((m) => {
     if (!m) return;
@@ -86,6 +95,8 @@ export default function DuelRoomPage() {
         return Array.from(byId.values());
       });
     }
+
+    // CHANGED: Handled FINISHED phase correctly
     if (m.status === "RUNNING") {
       setPhase("coding");
       const durationSec = (m.config?.duration || 15) * 60;
@@ -97,6 +108,7 @@ export default function DuelRoomPage() {
       }
     } else if (m.status === "FINISHED") {
       setPhase("finished");
+      if (m.winnerId) setWinnerId(m.winnerId);
     }
   }, [user?.id]);
 
@@ -137,9 +149,12 @@ export default function DuelRoomPage() {
     "duel:player-ready": ({ userId }) => {
       setReadyPlayers((prev) => new Set([...prev, userId]));
     },
-    "duel:finished": ({ match: m }) => {
+    // CHANGED: Listens to the backend judge to declare winner
+    "duel:finished": ({ match: m, winnerId: wId }) => {
+      if (wId) setWinnerId(wId);
       if (m) applyMatch(m);
       else loadMatch();
+      setPhase("finished"); // Immediately stop timer and show modal
     },
   };
 
@@ -154,11 +169,12 @@ export default function DuelRoomPage() {
           const defaultLang = langs.includes("javascript") ? "javascript" : langs[0] || "javascript";
           setLanguage(defaultLang);
           setCode(p.boilerplate?.[defaultLang] || code);
-        }).catch(() => {});
+        }).catch(() => { });
       });
     }
   }, [phase, problem?.slug]);
 
+  // Timer logic - Naturally stops when phase changes to "finished"
   useEffect(() => {
     if (phase !== "coding" || timer <= 0) return;
     const interval = setInterval(() => {
@@ -183,26 +199,20 @@ export default function DuelRoomPage() {
   const sendChat = () => {
     if (!chatInput.trim() || !user?.id) return;
     const message = chatInput.trim();
-    const clientMsgId = `local-${Date.now()}`;
+
+    // Clear the input field immediately
     setChatInput("");
-    seenChatIdsRef.current.add(clientMsgId);
-    setChat((prev) => [
-      ...prev,
-      {
-        id: clientMsgId,
-        sender: user.username,
-        senderId: user.id,
-        message,
-        isMe: true,
-      },
-    ]);
+
+    // Send to server. The socket listener will receive it and update the UI.
     socketRef.current?.emit("duel:chat", {
       matchId,
       message,
       senderId: user.id,
-      clientMsgId,
     });
   };
+
+
+
 
   const handleRun = async () => {
     const problemId = match?.config?.problem?.id || match?.config?.problemId;
@@ -235,6 +245,11 @@ export default function DuelRoomPage() {
       setRunning(false);
     }
   };
+  const handleForfeit = () => {
+    if (window.confirm("Are you sure you want to give up? You will lose this match and your rating will drop.")) {
+      socketRef.current?.emit("duel:forfeit", { matchId, userId: user?.id });
+    }
+  };
 
   const handleSubmit = async () => {
     const problemId = match?.config?.problem?.id || match?.config?.problemId;
@@ -253,26 +268,23 @@ export default function DuelRoomPage() {
         problemId: parseInt(problemId, 10),
         matchId: parseInt(matchId, 10),
       });
+
       const v = result.verdict;
       if (v) {
         setOutput(formatVerdictOutput(v));
         setOutputStatus(mapVerdictStatus(v.status));
+        // FIX: Auto-claim victory
         if (v.status === "ACCEPTED") {
-          socketRef.current?.emit("duel:submit-win", {
-            matchId,
-            winnerId: user?.id,
-          });
+          socketRef.current?.emit("duel:claim-victory", { matchId, userId: user?.id });
         }
       } else if (result.submission?.id) {
         const submission = await pollSubmission(result.submission.id);
         if (submission) {
           setOutput(formatVerdictOutput(submission));
           setOutputStatus(mapVerdictStatus(submission.status));
+          // FIX: Auto-claim victory
           if (submission.status === "ACCEPTED") {
-            socketRef.current?.emit("duel:submit-win", {
-              matchId,
-              winnerId: user?.id,
-            });
+            socketRef.current?.emit("duel:claim-victory", { matchId, userId: user?.id });
           }
         }
       }
@@ -284,15 +296,40 @@ export default function DuelRoomPage() {
     }
   };
 
-  const participants = match?.participants || [];
-  const me = participants.find((p) => p.id === user?.id);
-  const opponent = participants.find((p) => p.id !== user?.id);
-  const opponentReady = opponent ? readyPlayers.has(opponent.id) : false;
-  const isLocked = myReady && opponentReady;
-  const problem = match?.config?.problem;
+  // const participants = match?.participants || [];
+  // const me = participants.find((p) => p.id === user?.id);
+  // const opponent = participants.find((p) => p.id !== user?.id);
+  // const opponentReady = opponent ? readyPlayers.has(opponent.id) : false;
+  // const isLocked = myReady && opponentReady;
+  // const problem = match?.config?.problem;
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col">
+    <div className="h-[calc(100vh-4rem)] flex flex-col relative">
+
+      {/* NEW: Win/Loss Overlay Modal when match finishes */}
+      {phase === "finished" && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-card p-8 rounded-2xl border border-border text-center max-w-md w-full shadow-2xl"
+          >
+            <Trophy className={`w-20 h-20 mx-auto mb-4 ${winnerId === user?.id ? "text-yellow-500" : "text-muted"}`} />
+            <h2 className="text-3xl font-bold mb-2">
+              {winnerId === user?.id ? "Victory!" : "Defeat!"}
+            </h2>
+            <p className="text-muted mb-6">
+              {winnerId === user?.id
+                ? "You solved the problem first! Your rating will be updated shortly."
+                : "Your opponent finished before you. Better luck next time!"}
+            </p>
+            <Link href="/duel">
+              <Button className="w-full text-lg py-6">Return to Lobby</Button>
+            </Link>
+          </motion.div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass flex-shrink-0">
         <div className="flex items-center gap-3">
           <Link href="/duel" className="text-muted hover:text-primary transition-colors">
@@ -311,11 +348,10 @@ export default function DuelRoomPage() {
             <span>{opponent?.username || "Waiting..."}</span>
             <User className="w-4 h-4 text-danger" />
           </div>
-          {phase === "coding" && (
+          {(phase === "coding" || phase === "finished") && (
             <div
-              className={`flex items-center gap-2 px-3 py-1 rounded-lg border ${
-                timer < 60 ? "border-danger/50 text-danger" : "border-primary/30 text-primary"
-              }`}
+              className={`flex items-center gap-2 px-3 py-1 rounded-lg border ${timer < 60 ? "border-danger/50 text-danger" : "border-primary/30 text-primary"
+                }`}
             >
               <Clock className="w-4 h-4" />
               <span className="font-mono font-bold">{formatTime(timer)}</span>
@@ -474,10 +510,32 @@ export default function DuelRoomPage() {
                   className="w-40"
                 />
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm" onClick={handleRun} disabled={running}>
+                  {/* NEW: Manual Complete Match Button (Only shows if they passed) */}
+                  {outputStatus === "success" && phase !== "finished" && (
+                    <Button
+                      size="sm"
+                      onClick={() => socketRef.current?.emit("duel:claim-victory", { matchId, userId: user?.id })}
+                      className="bg-green-500 hover:bg-green-600 text-black border-none font-bold animate-pulse"
+                    >
+                      <Trophy className="w-4 h-4 mr-1" /> Claim Victory!
+                    </Button>
+                  )}
+
+                  {/* Give Up Button */}
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={handleForfeit}
+                    disabled={running || phase === "finished"}
+                    className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20"
+                  >
+                    Give Up
+                  </Button>
+
+                  <Button variant="secondary" size="sm" onClick={handleRun} disabled={running || phase === "finished"}>
                     <Play className="w-4 h-4" /> Run
                   </Button>
-                  <Button size="sm" onClick={handleSubmit} disabled={running}>
+                  <Button size="sm" onClick={handleSubmit} disabled={running || phase === "finished"}>
                     <Send className="w-4 h-4" /> Submit
                   </Button>
                 </div>

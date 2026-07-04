@@ -7,6 +7,34 @@ import { getIo } from "../sockets/io.js";
 
 const readyPlayers = new Map();
 
+export async function findMatchAutomatically(userId) {
+  // 1. Try to find an open match where the user is NOT already a participant
+  const openMatches = await prisma.match.findMany({
+    where: { status: "WAITING" },
+    include: { participants: true },
+    orderBy: { createdAt: "asc" }
+  });
+
+  const validMatch = openMatches.find(m => 
+    m.participants.length < 2 && 
+    !m.participants.some(p => p.userId === userId)
+  );
+
+  // 2. If an open match exists, join it
+  if (validMatch) {
+    return await joinMatch(validMatch.id, userId);
+  }
+
+  // 3. Otherwise, create a new waiting match
+  return await createMatch(userId, {
+    topic: "General",
+    difficulty: "EASY",
+    questionCount: 1,
+    duration: 30,
+    title: "1v1 Duel"
+  });
+}
+
 function emitMatchUpdate(matchId, match) {
   getIo()?.to(`duel:${matchId}`).emit("duel:match-update", { match });
 }

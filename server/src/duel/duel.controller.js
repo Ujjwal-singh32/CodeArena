@@ -14,6 +14,14 @@ export async function create(req, res, next) {
     next(err);
   }
 }
+export async function findOpponent(req, res, next) {
+  try {
+    const match = await duelService.findMatchAutomatically(getUserId(req));
+    res.json({ match });
+  } catch (err) {
+    next(err);
+  }
+}
 
 export async function list(req, res, next) {
   try {
