@@ -78,3 +78,12 @@ export async function submitConfig(req, res, next) {
     next(err);
   }
 }
+// Add this new function to the file
+export async function cancelFind(req, res, next) {
+  try {
+    await duelService.cancelMatchmaking(getUserId(req));
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}

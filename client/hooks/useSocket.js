@@ -29,6 +29,8 @@ export function useSocket(userId, handlers = {}) {
       "duel:started",
       "duel:player-ready",
       "duel:finished",
+      "duel:match-created",
+      "duel:match-found",
       "collab:chat",
       "collab:users",
       "collab:sync",

@@ -26,7 +26,9 @@ import ReactMarkdown from "react-markdown";
 // Otherwise, React destroys and recreates the editor on every single keystroke/render!
 const CollabEditor = dynamic(() => import("@/components/editor/CollabEditor"), {
   ssr: false,
-  loading: () => <div className="p-4 text-sm text-muted">Loading Editor...</div>
+  loading: () => (
+    <div className="p-4 text-sm text-muted">Loading Editor...</div>
+  ),
 });
 
 export default function CollabRoomPage() {
@@ -36,7 +38,12 @@ export default function CollabRoomPage() {
   const [language, setLanguage] = useState("javascript");
   const [members, setMembers] = useState([]);
   const [chat, setChat] = useState([
-    { id: "system-0", sender: "System", message: "Welcome to the collab room!", isSystem: true },
+    {
+      id: "system-0",
+      sender: "System",
+      message: "Welcome to the collab room!",
+      isSystem: true,
+    },
   ]);
   const [chatInput, setChatInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -47,7 +54,7 @@ export default function CollabRoomPage() {
 
   const userId = useMemo(
     () => (user?.id ? String(user.id) : `guest-${roomCode}`),
-    [user?.id, roomCode]
+    [user?.id, roomCode],
   );
   const username = user?.username || "guest";
 
@@ -72,11 +79,11 @@ export default function CollabRoomPage() {
       mySocketIdRef.current = socket.id;
       setSocketReady(true);
       // Use userRef here so auth refreshes don't break the socket connection
-      socket.emit("collab:join", { 
-        roomCode, 
-        userId: userRef.current.id, 
-        username: userRef.current.name, 
-        color: "#00ff88" 
+      socket.emit("collab:join", {
+        roomCode,
+        userId: userRef.current.id,
+        username: userRef.current.name,
+        color: "#00ff88",
       });
     });
 
@@ -88,7 +95,7 @@ export default function CollabRoomPage() {
           color: u.color,
           isOnline: true,
           isMe: u.odId === userRef.current.id, // Update this check too
-        }))
+        })),
       );
     });
 
@@ -141,7 +148,10 @@ export default function CollabRoomPage() {
           question: message.slice(1).trim(),
           problemTitle: `Collab Room ${roomCode}`,
         });
-        const aiText = res.response || res.message || "Here's my suggestion for your question.";
+        const aiText =
+          res.response ||
+          res.message ||
+          "Here's my suggestion for your question.";
         const aiMsgId = `ai-${Date.now()}`;
         addChatMessage({
           id: aiMsgId,
@@ -161,7 +171,8 @@ export default function CollabRoomPage() {
         addChatMessage({
           id: `ai-fallback-${Date.now()}`,
           sender: "AI",
-          message: "Try breaking the problem into smaller functions and test each part independently.",
+          message:
+            "Try breaking the problem into smaller functions and test each part independently.",
           isAi: true,
         });
       } finally {
@@ -178,7 +189,10 @@ export default function CollabRoomPage() {
     <div className="h-[calc(100vh-4rem)] flex flex-col">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card glass flex-shrink-0">
         <div className="flex items-center gap-3">
-          <Link href="/collab" className="text-muted hover:text-primary transition-colors">
+          <Link
+            href="/collab"
+            className="text-muted hover:text-primary transition-colors"
+          >
             <ChevronLeft className="w-5 h-5" />
           </Link>
           <span className="text-sm font-semibold">Collab Room</span>
@@ -189,23 +203,33 @@ export default function CollabRoomPage() {
 
         <div className="flex items-center gap-4">
           <div className="hidden sm:flex items-center gap-2">
-            {members.filter((m) => m.isOnline).map((m) => (
-              <div key={m.id} className="flex items-center gap-1.5 text-xs">
-                <Circle className="w-2 h-2 fill-current" style={{ color: m.color }} />
-                <span className={m.isMe ? "text-primary" : "text-muted"}>{m.username}</span>
-              </div>
-            ))}
+            {members
+              .filter((m) => m.isOnline)
+              .map((m) => (
+                <div key={m.id} className="flex items-center gap-1.5 text-xs">
+                  <Circle
+                    className="w-2 h-2 fill-current"
+                    style={{ color: m.color }}
+                  />
+                  <span className={m.isMe ? "text-primary" : "text-muted"}>
+                    {m.username}
+                  </span>
+                </div>
+              ))}
           </div>
           <div className="flex items-center gap-1 text-xs text-muted">
             <Users className="w-4 h-4" />
-            {members.filter((m) => m.isOnline).length}/{Math.max(members.length, 1)}
+            {members.filter((m) => m.isOnline).length}/
+            {Math.max(members.length, 1)}
           </div>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         <div className="w-[200px] border-r border-border p-4 flex-shrink-0 hidden md:block overflow-y-auto">
-          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Online</h4>
+          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">
+            Online
+          </h4>
           <div className="space-y-3">
             {members.map((m) => (
               <div key={m.id} className="flex items-center gap-2">
@@ -216,10 +240,14 @@ export default function CollabRoomPage() {
                   {m.username[0]?.toUpperCase() || "?"}
                 </div>
                 <div>
-                  <p className={`text-xs font-medium ${m.isMe ? "text-primary" : "text-foreground"}`}>
+                  <p
+                    className={`text-xs font-medium ${m.isMe ? "text-primary" : "text-foreground"}`}
+                  >
                     {m.username} {m.isMe && "(you)"}
                   </p>
-                  <p className="text-[10px] text-muted">{m.isOnline ? "Online" : "Offline"}</p>
+                  <p className="text-[10px] text-muted">
+                    {m.isOnline ? "Online" : "Offline"}
+                  </p>
                 </div>
               </div>
             ))}
@@ -265,47 +293,102 @@ export default function CollabRoomPage() {
                 className={cn(
                   "text-xs rounded-lg px-3 py-2",
                   msg.isMe && "bg-primary/10 ml-8",
-                  !msg.isMe && !msg.isAi && !msg.isSystem && "bg-card border border-border mr-8",
+                  !msg.isMe &&
+                    !msg.isAi &&
+                    !msg.isSystem &&
+                    "bg-card border border-border mr-8",
                   msg.isAi && "bg-primary/5 border border-primary/20",
-                  msg.isSystem && "text-muted italic text-center mx-auto bg-transparent border-none p-1"
+                  msg.isSystem &&
+                    "text-muted italic text-center mx-auto bg-transparent border-none p-1",
                 )}
               >
                 {!msg.isSystem && (
-                  <div className={cn("font-medium mb-1", msg.isMe ? "text-primary text-right" : msg.isAi ? "text-primary" : "text-muted")}>
+                  <div
+                    className={cn(
+                      "font-medium mb-1",
+                      msg.isMe
+                        ? "text-primary text-right"
+                        : msg.isAi
+                          ? "text-primary"
+                          : "text-muted",
+                    )}
+                  >
                     {msg.isAi && <Bot className="w-3.5 h-3.5 inline mr-1" />}
                     {msg.sender}
                   </div>
                 )}
-                
+
                 {msg.isAi ? (
                   <div className="text-foreground">
                     <ReactMarkdown
                       components={{
-                        code({ node, inline, className, children, ...props }) {
-                          return !inline ? (
-                            <div className="bg-background rounded-md p-2 my-2 overflow-x-auto border border-border">
-                              <code className="text-[11px] font-mono text-foreground/90" {...props}>
-                                {children}
-                              </code>
-                            </div>
-                          ) : (
-                            <code className="bg-background px-1 py-0.5 rounded text-primary text-[11px] font-mono border border-border" {...props}>
+                        pre({ children }) {
+                          return (
+                            <pre className="bg-background rounded-md p-2 my-2 overflow-x-auto border border-border">
+                              {children}
+                            </pre>
+                          );
+                        },
+
+                        code({ className, children, ...props }) {
+                          return (
+                            <code
+                              className={cn(className, "font-mono text-[11px]")}
+                              {...props}
+                            >
                               {children}
                             </code>
                           );
                         },
-                        p: ({ children }) => <p className="leading-relaxed mb-2 last:mb-0">{children}</p>,
-                        ul: ({ children }) => <ul className="list-disc pl-4 my-2 space-y-1">{children}</ul>,
-                        ol: ({ children }) => <ol className="list-decimal pl-4 my-2 space-y-1">{children}</ol>,
-                        h3: ({ children }) => <h3 className="font-semibold text-primary mt-3 mb-1">{children}</h3>,
-                        strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+
+                        p({ children }) {
+                          return (
+                            <p className="leading-relaxed mb-2 last:mb-0">
+                              {children}
+                            </p>
+                          );
+                        },
+
+                        ul({ children }) {
+                          return (
+                            <ul className="list-disc pl-4 my-2 space-y-1">
+                              {children}
+                            </ul>
+                          );
+                        },
+
+                        ol({ children }) {
+                          return (
+                            <ol className="list-decimal pl-4 my-2 space-y-1">
+                              {children}
+                            </ol>
+                          );
+                        },
+
+                        h3({ children }) {
+                          return (
+                            <h3 className="font-semibold text-primary mt-3 mb-1">
+                              {children}
+                            </h3>
+                          );
+                        },
+
+                        strong({ children }) {
+                          return (
+                            <strong className="font-semibold">
+                              {children}
+                            </strong>
+                          );
+                        },
                       }}
                     >
                       {msg.message}
                     </ReactMarkdown>
                   </div>
                 ) : (
-                  <div className={cn("text-foreground", msg.isMe && "text-right")}>
+                  <div
+                    className={cn("text-foreground", msg.isMe && "text-right")}
+                  >
                     {msg.message}
                   </div>
                 )}
@@ -326,7 +409,11 @@ export default function CollabRoomPage() {
               placeholder="Message... (@ for AI)"
               className="flex-1 px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary/50"
             />
-            <Button size="sm" onClick={sendChat} disabled={aiLoading || !chatInput.trim()}>
+            <Button
+              size="sm"
+              onClick={sendChat}
+              disabled={aiLoading || !chatInput.trim()}
+            >
               <Send className="w-3.5 h-3.5" />
             </Button>
           </div>

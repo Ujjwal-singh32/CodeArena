@@ -13,5 +13,5 @@ router.post("/matches/:id/join", duelController.join);
 router.post("/matches/:id/config", duelController.submitConfig);
 router.post("/matches/:id/start", duelController.start);
 router.post("/matches/find", duelController.findOpponent);
-
+router.post("/matches/cancel-find", duelController.cancelFind);
 export default router;
