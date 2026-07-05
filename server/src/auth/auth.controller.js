@@ -4,6 +4,8 @@ import { AppError } from "../utils/AppError.js";
 import { env } from "../config/env.js";
 import { parseExpiresToMs, verifyToken } from "../utils/jwt.js";
 import { ZodError } from "zod";
+import { checkUsernameInBloom } from "../utils/bloomFilter.js";
+import prisma from "../config/db.js";
 
 function setAuthCookies(res, { accessToken, refreshToken }) {
   const isProd = env.nodeEnv === "production";
@@ -94,5 +96,36 @@ export async function refresh(req, res, next) {
     res.clearCookie("accessToken");
     res.clearCookie("refreshToken");
     next(err);
+  }
+}
+
+
+// ADD THIS NEW FUNCTION at the bottom of the file
+export async function checkUsername(req, res, next) {
+  try {
+    const { username } = req.query;
+    if (!username) {
+      return res.status(400).json({ error: "Username query parameter is required" });
+    }
+
+    // 1. Fast Path: Check Bloom Filter First (O(1) Redis Call)
+    const probablyExists = await checkUsernameInBloom(username);
+
+    if (!probablyExists) {
+      // Bloom filter guarantees it DOES NOT exist. We skip the database!
+      return res.json({ available: true, source: "bloom_filter" });
+    }
+
+    // 2. Slow Path: False Positives are possible. If Bloom says true, verify in DB.
+    const user = await prisma.user.findUnique({
+      where: { username: username.toLowerCase() }
+    });
+
+    return res.json({ 
+      available: !user,
+      source: "database"
+    });
+  } catch (error) {
+    next(error);
   }
 }

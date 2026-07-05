@@ -89,8 +89,8 @@ export async function getUserDashboard(userId) {
     duels,
     activity,
     heatmapSubmissions,
-    solvedProblems,
-    allTags,
+    solvedSubmissions, // Replaced solvedProblems to get distinct IDs
+    allProblems, // Replaced allTags to get real problem counts
   ] = await Promise.all([
     getUserRank(userId),
     prisma.submission.findMany({
@@ -123,14 +123,20 @@ export async function getUserDashboard(userId) {
       orderBy: { createdAt: "desc" },
       take: 365,
     }),
+    // FIX 1: Only get DISTINCT accepted problem IDs
     prisma.submission.findMany({
       where: { userId, status: "ACCEPTED" },
-      select: { problem: { select: { tags: { include: { tag: true } } } } },
+      select: { problemId: true },
+      distinct: ['problemId'], 
     }),
-    prisma.tag.findMany(),
+    // FIX 1: Get all problems to calculate real topic totals
+    prisma.problem.findMany({
+      where: { isPublished: true },
+      select: { id: true, tags: { include: { tag: true } } },
+    }),
   ]);
 
-  // 4. Process the data
+  // --- Process Heatmap ---
   const heatmapMap = {};
   for (const s of heatmapSubmissions) {
     const day = s.createdAt.toISOString().slice(0, 10);
@@ -141,29 +147,69 @@ export async function getUserDashboard(userId) {
     count,
   }));
 
-  const topicMap = {};
-  for (const s of solvedProblems) {
-    for (const t of s.problem.tags) {
-      topicMap[t.tag.name] = (topicMap[t.tag.name] || 0) + 1;
+  // --- FIX 1: Process Accurate Topic Progress ---
+  const topicTotalMap = {};
+  for (const p of allProblems) {
+    for (const t of p.tags) {
+      topicTotalMap[t.tag.name] = (topicTotalMap[t.tag.name] || 0) + 1;
     }
   }
 
-  const topicProgress = allTags
-    .map((tag) => {
-      const solved = topicMap[tag.name] || 0;
-      const total = 0; // Keeping your existing logic
+  const solvedProblemIds = solvedSubmissions.map(s => s.problemId);
+  const solvedProblemsWithTags = allProblems.filter(p => solvedProblemIds.includes(p.id));
+
+  const topicSolvedMap = {};
+  for (const p of solvedProblemsWithTags) {
+    for (const t of p.tags) {
+      topicSolvedMap[t.tag.name] = (topicSolvedMap[t.tag.name] || 0) + 1;
+    }
+  }
+
+  const topicProgress = Object.keys(topicTotalMap)
+    .map((tagName) => {
+      const solved = topicSolvedMap[tagName] || 0;
+      const total = topicTotalMap[tagName];
       return {
-        topic: tag.name,
+        topic: tagName,
         solved,
-        total: Math.max(solved, 5),
-        percentage: Math.min(
-          100,
-          Math.round((solved / Math.max(solved, 5)) * 100),
-        ),
+        total,
+        percentage: total > 0 ? Math.round((solved / total) * 100) : 0,
       };
     })
     .filter((t) => t.solved > 0)
+    .sort((a, b) => b.solved - a.solved) // Sort by most solved topics first
     .slice(0, 8);
+
+  // --- FIX 2: Calculate Accurate Streak ---
+  const uniqueDates = Object.keys(heatmapMap);
+  let streak = 0;
+  
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+  let checkDate = new Date(today);
+  if (uniqueDates.includes(todayStr)) {
+    // Start counting from today
+  } else if (uniqueDates.includes(yesterdayStr)) {
+    // Start counting from yesterday (so they don't lose streak if they haven't solved yet today)
+    checkDate = yesterday;
+  } else {
+    // No recent activity
+    checkDate = null;
+  }
+
+  if (checkDate) {
+    let currentStr = checkDate.toISOString().slice(0, 10);
+    while (uniqueDates.includes(currentStr)) {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+      currentStr = checkDate.toISOString().slice(0, 10);
+    }
+  }
 
   // 5. Construct the final payload
   const result = {
@@ -172,7 +218,8 @@ export async function getUserDashboard(userId) {
       username: user.username,
       email: user.email,
       rating: user.rating,
-      solvedCount: user.solvedCount,
+      solvedCount: user.solvedCount, // You might want to update this to solvedSubmissions.length in the future!
+      streak: streak, // <-- STREAK PASSED HERE
       rank,
       bio: user.profile?.bio || "",
       github: user.profile?.github || "",
@@ -180,6 +227,7 @@ export async function getUserDashboard(userId) {
       leetcode: user.profile?.leetcode || "",
       joinDate: user.createdAt,
     },
+    // ... leave the rest of your result object EXACTLY the same ...
     recentSubmissions: submissions.map((s) => ({
       id: s.id,
       problem: s.problem.title,

@@ -5,13 +5,62 @@ import { AppError } from "../utils/AppError.js";
 import { signAccessToken, signRefreshToken, parseExpiresToMs, verifyToken } from "../utils/jwt.js";
 import { sendVerificationEmail } from "../utils/email.js";
 import { env } from "../config/env.js";
+import { addUsernameToBloom } from "../utils/bloomFilter.js"; // <-- ADDED: Import Bloom Filter utility
 
 export async function registerUser({ username, email, password }) {
-  const existing = await prisma.user.findFirst({
-    where: { OR: [{ email }, { username }] },
-  });
-  if (existing) throw new AppError("Username or email already exists", 409);
+  // 1. Check for existing email and username separately
+  const existingEmail = await prisma.user.findUnique({ where: { email } });
+  const existingUsername = await prisma.user.findUnique({ where: { username } });
 
+  // 2. Prevent taking someone else's username
+  if (existingUsername && existingUsername.email !== email) {
+    throw new AppError("Username already exists", 409);
+  }
+
+  // 3. Handle the existing email logic
+  if (existingEmail) {
+    if (existingEmail.emailVerified) {
+      throw new AppError("Email is already registered and verified. Please log in.", 409);
+    } else {
+      // User exists but is UNVERIFIED. 
+      // We will update their password, clean up old tokens, and resend the email.
+      const passwordHash = await bcrypt.hash(password, 12);
+      
+      const updatedUser = await prisma.user.update({
+        where: { id: existingEmail.id },
+        data: { passwordHash, username } // Update username in case they typed a new one
+      });
+
+      // Also ensure the updated username is in the Bloom Filter
+      addUsernameToBloom(updatedUser.username).catch(err => console.error(err));
+
+      // Delete any old verification tokens to keep the database clean
+      await prisma.verificationToken.deleteMany({
+        where: { userId: updatedUser.id }
+      });
+
+      // Generate a fresh token
+      const token = uuidv4();
+      await prisma.verificationToken.create({
+        data: {
+          token,
+          userId: updatedUser.id,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        },
+      });
+
+      await sendVerificationEmail(updatedUser.email, token);
+
+      return { 
+        id: updatedUser.id, 
+        username: updatedUser.username, 
+        email: updatedUser.email, 
+        message: "Verification email resent" 
+      };
+    }
+  }
+
+  // 4. If we reach here, it is a brand new user. Proceed with normal creation.
   const passwordHash = await bcrypt.hash(password, 12);
   const user = await prisma.user.create({
     data: {
@@ -22,12 +71,14 @@ export async function registerUser({ username, email, password }) {
     },
   });
 
+  addUsernameToBloom(user.username).catch(err => console.error("Bloom error:", err));
+
   const token = uuidv4();
   await prisma.verificationToken.create({
     data: {
       token,
       userId: user.id,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
     },
   });
 

@@ -14,13 +14,17 @@ export async function rateLimit({ key, limit = 60, windowSec = 60 }) {
   }
 }
 
-export function rateLimitMiddleware(prefix, limit = 60) {
+export function rateLimitMiddleware(prefix, limit = 60, windowSec = 60) {
   return async (req, _res, next) => {
     const ip = req.ip || req.connection?.remoteAddress || "unknown";
-    const result = await rateLimit({ key: `${prefix}:${ip}`, limit });
+    
+    // Pass the windowSec down to the core function
+    const result = await rateLimit({ key: `${prefix}:${ip}`, limit, windowSec });
+    
     if (!result.allowed) {
       const { AppError } = await import("../utils/AppError.js");
-      return next(new AppError("Too many requests", 429));
+      // Give a clear message for the 1-hour block
+      return next(new AppError(`Too many requests. Please try again in a while.`, 429));
     }
     next();
   };

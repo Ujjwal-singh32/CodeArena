@@ -100,7 +100,7 @@ export default function DashboardPage() {
           value={displayUser.rating || 0}
           suffix={rating.tier}
         />
-        <StatCard icon={Flame} label="Streak" value={0} suffix="days" />
+        <StatCard icon={Flame} label="Streak" value={displayUser.streak || 0} suffix="days" />
         <StatCard
           icon={Trophy}
           label="Global Rank"
