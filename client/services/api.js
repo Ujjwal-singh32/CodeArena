@@ -52,6 +52,7 @@ export const problemsApi = {
     return request(`/problems${qs ? `?${qs}` : ""}`);
   },
   getBySlug: (slug) => request(`/problems/${slug}`),
+  getTopics: () => request(`/problems/topics`),
 };
 
 // INSIDE temp/client/services/api.js
@@ -90,7 +91,8 @@ export const duelApi = {
   submitConfig: (matchId, body) =>
     request(`/duel/matches/${matchId}/config`, { method: "POST", body: JSON.stringify(body) }),
   start: (matchId) => request(`/duel/matches/${matchId}/start`, { method: "POST" }),
-  findMatch: () => request("/duel/matches/find", { method: "POST" })
+  findMatch: () => request("/duel/matches/find", { method: "POST" }),
+  cancelFindMatch: () => request("/duel/matches/cancel-find", { method: "POST" }),
 };
 
 export const collabApi = {

@@ -75,27 +75,34 @@ async function callCohere(prompt) {
 
 export async function selectDuelProblem(config) {
   // 1. Fetch ALL matching problem IDs (fetching just the ID is very fast/lightweight)
+  const where = {
+    isPublished: true,
+    difficulty: config.difficulty,
+  };
+
+  // 2. Only add topic filtering if a specific, non-general topic is provided
+  if (config.topic && config.topic.toLowerCase() !== "general") {
+    where.OR = [
+      {
+        tags: {
+          some: {
+            tag: { name: { equals: config.topic, mode: "insensitive" } },
+          },
+        },
+      },
+      {
+        categories: {
+          some: {
+            category: { name: { equals: config.topic, mode: "insensitive" } },
+          },
+        },
+      },
+    ];
+  }
+
+  // 3. Fetch all matching problem IDs
   const problems = await prisma.problem.findMany({
-    where: {
-      isPublished: true,
-      difficulty: config.difficulty,
-      OR: [
-        {
-          tags: {
-            some: {
-              tag: { name: { equals: config.topic, mode: "insensitive" } },
-            },
-          },
-        },
-        {
-          categories: {
-            some: {
-              category: { name: { equals: config.topic, mode: "insensitive" } },
-            },
-          },
-        },
-      ],
-    },
+    where,
     select: { id: true },
   });
 
@@ -110,12 +117,6 @@ export async function selectDuelProblem(config) {
     where: { isPublished: true, difficulty: config.difficulty },
     select: { id: true },
   });
-
-  if (fallbacks.length > 0) {
-    const randomIndex = Math.floor(Math.random() * fallbacks.length);
-    return fallbacks[randomIndex].id;
-  }
-
   return null;
 }
 

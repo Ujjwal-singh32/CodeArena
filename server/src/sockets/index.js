@@ -1,15 +1,15 @@
 import prisma from "../config/db.js";
-import { finishMatch } from "../duel/duel.service.js";
+import { finishMatch, handlePlayerLeave } from "../duel/duel.service.js";
 import * as Y from "yjs";
 
 const collabRooms = new Map();
 // 1. Add a map to track our cleanup timers
-const cleanupTimers = new Map(); 
+const cleanupTimers = new Map();
 
 function getCollabRoom(code) {
   const key = code.toUpperCase();
   if (!collabRooms.has(key)) {
-    collabRooms.set(key, { users: new Map(), ydoc: new Y.Doc() }); 
+    collabRooms.set(key, { users: new Map(), ydoc: new Y.Doc() });
   }
   return collabRooms.get(key);
 }
@@ -25,14 +25,14 @@ export function setupSockets(io) {
       const key = roomCode.toUpperCase();
       const room = getCollabRoom(roomCode);
       const odId = String(userId || socket.id);
-      
+
       room.users.set(socket.id, {
         id: socket.id,
         odId,
         name: username || "guest",
         color: color || "#00ff88",
       });
-      
+
       socket.join(`collab:${key}`);
       socket.collabRoom = key;
       socket.collabUserId = odId;
@@ -52,23 +52,32 @@ export function setupSockets(io) {
     socket.on("collab:update", ({ roomCode, update }) => {
       const room = getCollabRoom(roomCode);
       Y.applyUpdate(room.ydoc, new Uint8Array(update));
-      socket.to(`collab:${roomCode.toUpperCase()}`).emit("collab:sync", { update });
+      socket
+        .to(`collab:${roomCode.toUpperCase()}`)
+        .emit("collab:sync", { update });
     });
 
     socket.on("collab:awareness", ({ roomCode, update }) => {
-      socket.to(`collab:${roomCode.toUpperCase()}`).emit("collab:awareness", { update });
+      socket
+        .to(`collab:${roomCode.toUpperCase()}`)
+        .emit("collab:awareness", { update });
     });
 
-    socket.on("collab:chat", ({ roomCode, sender, message, isAi, senderSocketId, clientMsgId }) => {
-      const payload = {
-        sender,
-        message,
-        isAi: !!isAi,
-        senderSocketId: senderSocketId || socket.id,
-        clientMsgId: clientMsgId || null,
-      };
-      socket.to(`collab:${roomCode.toUpperCase()}`).emit("collab:chat", payload);
-    });
+    socket.on(
+      "collab:chat",
+      ({ roomCode, sender, message, isAi, senderSocketId, clientMsgId }) => {
+        const payload = {
+          sender,
+          message,
+          isAi: !!isAi,
+          senderSocketId: senderSocketId || socket.id,
+          clientMsgId: clientMsgId || null,
+        };
+        socket
+          .to(`collab:${roomCode.toUpperCase()}`)
+          .emit("collab:chat", payload);
+      },
+    );
 
     socket.on("collab:leave", ({ roomCode }) => {
       leaveCollabRoom(socket, io, roomCode);
@@ -76,29 +85,37 @@ export function setupSockets(io) {
 
     // ── Duel room ──
     socket.on("duel:join", ({ matchId, userId }) => {
+      const timerKey = `duel:${matchId}:${userId}`;
+      if (cleanupTimers.has(timerKey)) {
+        clearTimeout(cleanupTimers.get(timerKey));
+        cleanupTimers.delete(timerKey);
+      }
       socket.join(`duel:${matchId}`);
       socket.duelMatchId = matchId;
       socket.duelUserId = userId;
     });
 
-    socket.on("duel:chat", async ({ matchId, message, senderId, clientMsgId }) => {
-      try {
-        const msg = await prisma.chatMessage.create({
-          data: { matchId: parseInt(matchId, 10), senderId, message },
-          include: { sender: { select: { username: true } } },
-        });
-        io.to(`duel:${matchId}`).emit("duel:chat", {
-          id: String(msg.id),
-          clientMsgId: clientMsgId || null,
-          sender: msg.sender.username,
-          senderId,
-          message: msg.message,
-          time: msg.createdAt.toISOString(),
-        });
-      } catch (err) {
-        console.error("duel:chat error:", err.message);
-      }
-    });
+    socket.on(
+      "duel:chat",
+      async ({ matchId, message, senderId, clientMsgId }) => {
+        try {
+          const msg = await prisma.chatMessage.create({
+            data: { matchId: parseInt(matchId, 10), senderId, message },
+            include: { sender: { select: { username: true } } },
+          });
+          io.to(`duel:${matchId}`).emit("duel:chat", {
+            id: String(msg.id),
+            clientMsgId: clientMsgId || null,
+            sender: msg.sender.username,
+            senderId,
+            message: msg.message,
+            time: msg.createdAt.toISOString(),
+          });
+        } catch (err) {
+          console.error("duel:chat error:", err.message);
+        }
+      },
+    );
 
     socket.on("duel:config-ready", ({ matchId, userId }) => {
       io.to(`duel:${matchId}`).emit("duel:player-ready", { userId });
@@ -111,25 +128,28 @@ export function setupSockets(io) {
     socket.on("duel:forfeit", async ({ matchId, userId }) => {
       try {
         // Find the match and its participants
-        const match = await prisma.match.findUnique({ 
-          where: { id: parseInt(matchId, 10) }, 
-          include: { participants: true } 
+        const match = await prisma.match.findUnique({
+          where: { id: parseInt(matchId, 10) },
+          include: { participants: true },
         });
-        
+
         if (!match || match.status !== "RUNNING") return;
 
         // The winner is the person who did NOT forfeit
-        const opponent = match.participants.find(p => p.userId !== userId);
-        const winnerId = opponent ? opponent.userId : userId; 
+        const opponent = match.participants.find((p) => p.userId !== userId);
+        const winnerId = opponent ? opponent.userId : userId;
 
         // Finish the match and calculate ELO
-        const finishedMatch = await finishMatch(parseInt(matchId, 10), winnerId);
-        
+        const finishedMatch = await finishMatch(
+          parseInt(matchId, 10),
+          winnerId,
+        );
+
         // Broadcast the finish event to everyone in the room
-        io.to(`duel:${matchId}`).emit("duel:finished", { 
-          matchId, 
-          winnerId, 
-          match: finishedMatch 
+        io.to(`duel:${matchId}`).emit("duel:finished", {
+          matchId,
+          winnerId,
+          match: finishedMatch,
         });
       } catch (err) {
         console.error("duel:forfeit error:", err.message);
@@ -139,25 +159,25 @@ export function setupSockets(io) {
     socket.on("duel:claim-victory", async ({ matchId, userId }) => {
       try {
         const mId = parseInt(matchId, 10);
-        
+
         // SECURITY CHECK: Did this user actually get an ACCEPTED submission for this match?
         const acceptedSub = await prisma.submission.findFirst({
-          where: { 
-            matchId: mId, 
-            userId: userId, 
-            status: "ACCEPTED" 
-          }
+          where: {
+            matchId: mId,
+            userId: userId,
+            status: "ACCEPTED",
+          },
         });
 
         if (acceptedSub) {
           // They genuinely passed. Finish the match and distribute ELO.
           const finishedMatch = await finishMatch(mId, userId);
-          
+
           // Broadcast to both players that the match is over
-          io.to(`duel:${matchId}`).emit("duel:finished", { 
-            matchId, 
-            winnerId: userId, 
-            match: finishedMatch 
+          io.to(`duel:${matchId}`).emit("duel:finished", {
+            matchId,
+            winnerId: userId,
+            match: finishedMatch,
           });
         }
       } catch (err) {
@@ -169,6 +189,25 @@ export function setupSockets(io) {
       if (socket.collabRoom) {
         leaveCollabRoom(socket, io, socket.collabRoom);
       }
+      if (socket.duelMatchId && socket.duelUserId) {
+        const { duelMatchId, duelUserId } = socket;
+
+        // FIX: Prevent crashing if the ID is a fake string (NaN)
+        const parsedMatchId = parseInt(duelMatchId, 10);
+        const parsedUserId = parseInt(duelUserId, 10);
+
+        if (isNaN(parsedMatchId) || isNaN(parsedUserId)) return;
+        const timer = setTimeout(async () => {
+          try {
+           await handlePlayerLeave(parsedMatchId, parsedUserId);
+      
+          } catch (err) {
+            console.error("Disconnect cleanup error:", err);
+          }
+        }, 120000);
+
+        cleanupTimers.set(`duel:${duelMatchId}:${duelUserId}`, timer);
+      }
     });
   });
 }
@@ -176,23 +215,26 @@ export function setupSockets(io) {
 function leaveCollabRoom(socket, io, roomCode) {
   const key = roomCode.toUpperCase();
   const room = collabRooms.get(key);
-  
+
   if (!room) return;
 
   room.users.delete(socket.id);
   socket.leave(`collab:${key}`);
-  
+
   // 3. The Grace Period Logic
   if (room.users.size === 0) {
     // Wait 24 hours (86400000 milliseconds) before destroying the code
-    const timer = setTimeout(() => {
-      if (collabRooms.has(key) && collabRooms.get(key).users.size === 0) {
-        collabRooms.get(key).ydoc.destroy();
-        collabRooms.delete(key);
-        cleanupTimers.delete(key);
-      }
-    }, 24 * 60 * 60 * 1000); // <-- 24 hours
-    
+    const timer = setTimeout(
+      () => {
+        if (collabRooms.has(key) && collabRooms.get(key).users.size === 0) {
+          collabRooms.get(key).ydoc.destroy();
+          collabRooms.delete(key);
+          cleanupTimers.delete(key);
+        }
+      },
+      24 * 60 * 60 * 1000,
+    ); // <-- 24 hours
+
     cleanupTimers.set(key, timer);
   } else {
     broadcastCollabUsers(io, roomCode);

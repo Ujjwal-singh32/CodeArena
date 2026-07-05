@@ -25,3 +25,12 @@ export async function getBySlug(req, res, next) {
     next(err);
   }
 }
+// Add to src/problems/problems.controller.js
+export async function getTopics(req, res, next) {
+  try {
+    const topics = await problemsService.getTopics();
+    res.json({ topics });
+  } catch (err) {
+    next(err);
+  }
+}

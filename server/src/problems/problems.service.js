@@ -252,3 +252,10 @@ export function clientToPrismaLang(lang) {
   };
   return map[lang] || "JAVASCRIPT";
 }
+export async function getTopics() {
+  const tags = await prisma.tag.findMany({
+    select: { name: true },
+    orderBy: { name: "asc" },
+  });
+  return tags.map((t) => t.name);
+}

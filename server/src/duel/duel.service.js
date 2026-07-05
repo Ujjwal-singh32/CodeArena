@@ -3,35 +3,51 @@ import { AppError } from "../utils/AppError.js";
 import { addEmailJob } from "../queues/index.js";
 import { selectDuelProblem } from "../ai/ai.service.js";
 import { getIo } from "../sockets/io.js";
-
+import { getRedis } from "../config/redis.js";
 const readyPlayers = new Map();
 
 export async function findMatchAutomatically(userId) {
   // 1. Try to find an open match where the user is NOT already a participant
-  const openMatches = await prisma.match.findMany({
-    where: { status: "WAITING" },
-    include: { participants: true },
-    orderBy: { createdAt: "asc" }
-  });
+  const redis = getRedis();
+  if (!redis) throw new AppError("Matchmaking is currently unavailable", 503);
+  const queueKey = "duel:matchmaking_queue";
+  const existingQueue = await redis.lrange(queueKey, 0, -1);
+  if (existingQueue.includes(String(userId))) {
+    return { status: "queued", message: "Already in matchmaking queue" };
+  }
+  await redis.rpush(queueKey, String(userId));
 
-  const validMatch = openMatches.find(m => 
-    m.participants.length < 2 && 
-    !m.participants.some(p => p.userId === userId)
-  );
+  const queueLen = await redis.llen(queueKey);
+  if (queueLen >= 2) {
+    // Pop the first 2 players
+    const player1 = await redis.lpop(queueKey);
+    const player2 = await redis.lpop(queueKey);
 
-  // 2. If an open match exists, join it
-  if (validMatch) {
-    return await joinMatch(validMatch.id, userId);
+    // Create the match with Player 1 as creator
+    const match = await createMatch(parseInt(player1, 10), {
+      topic: "General",
+      difficulty: "EASY",
+      questionCount: 1,
+      duration: 30,
+      title: "Auto-Match Duel",
+    });
+
+    // Add Player 2 to the match
+    const parsedMatchId = parseInt(match.id, 10);
+    await joinMatch(parsedMatchId, parseInt(player2, 10));
+
+    // Notify both players instantly via Socket.IO
+    const io = getIo();
+    if (io) {
+      io.to(`user:${player1}`).emit("duel:match-found", { matchId: match.id });
+      io.to(`user:${player2}`).emit("duel:match-found", { matchId: match.id });
+    }
+
+    return { status: "matched", matchId: match.id };
   }
 
-  // 3. Otherwise, create a new waiting match
-  return await createMatch(userId, {
-    topic: "General",
-    difficulty: "EASY",
-    questionCount: 1,
-    duration: 30,
-    title: "1v1 Duel"
-  });
+  // 4. If not enough players yet, return queued status
+  return { status: "queued", message: "Waiting for opponent..." };
 }
 
 function emitMatchUpdate(matchId, match) {
@@ -42,19 +58,25 @@ function clearReady(matchId) {
   readyPlayers.delete(matchId);
 }
 
-export async function createMatch(userId, { topic, difficulty, questionCount, duration, title }) {
+export async function createMatch(
+  userId,
+  { topic, difficulty, questionCount, duration, title },
+) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError("User not found", 404);
-
+  const problemId = await selectDuelProblem({ topic, difficulty });
   const match = await prisma.match.create({
     data: {
       status: "WAITING",
+      title: title,
       config: {
         create: {
           topic,
           difficulty,
           questionCount: parseInt(questionCount, 10),
           duration: parseInt(duration, 10),
+          isLocked: true, // NEW: Immediately lock the config
+          problemId: problemId,
         },
       },
       participants: {
@@ -66,14 +88,37 @@ export async function createMatch(userId, { topic, difficulty, questionCount, du
     },
     include: {
       config: true,
-      participants: { include: { user: { select: { username: true, rating: true } } } },
+      participants: {
+        include: { user: { select: { username: true, rating: true } } },
+      },
     },
   });
-
-  return formatMatch(match,title); // Remove the second argument here
+  const io = getIo();
+  if (io) {
+    io.emit("duel:match-created", formatMatch(match)); // Emits to everyone
+  }
+  return formatMatch(match, title); // Remove the second argument here
 }
 
-export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax }) {
+export async function listOpenMatches({
+  topic,
+  difficulty,
+  ratingMin,
+  ratingMax,
+}) {
+  const redis = getRedis();
+  const cacheKey = `duel:matches:list:${topic || "all"}:${difficulty || "all"}:${ratingMin || 0}:${ratingMax || "max"}`;
+  if (redis) {
+    try {
+      const cachedMatches = await redis.get(cacheKey);
+      if (cachedMatches) {
+        return JSON.parse(cachedMatches); // Return instantly from memory!
+      }
+    } catch (err) {
+      console.warn("Redis cache read error in listOpenMatches:", err.message);
+    }
+  }
+
   const matches = await prisma.match.findMany({
     // REMOVED status: "WAITING" so we get all matches for the lobby history
     include: {
@@ -85,9 +130,7 @@ export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax 
     orderBy: { createdAt: "desc" },
     take: 50,
   });
-
-  return matches
-    // REMOVED .filter((m) => m.participants.length < 2)
+  const formattedMatches = matches
     .filter((m) => !topic || m.config?.topic === topic)
     .filter((m) => !difficulty || m.config?.difficulty === difficulty)
     .filter((m) => {
@@ -97,60 +140,114 @@ export async function listOpenMatches({ topic, difficulty, ratingMin, ratingMax 
       return true;
     })
     .map((m) => formatMatch(m));
+  if (redis) {
+    try {
+      // EX 5 = Expires in 5 seconds. Keeps the lobby feeling "live" without killing the DB.
+      await redis.set(cacheKey, JSON.stringify(formattedMatches), "EX", 5);
+    } catch (err) {
+      console.warn("Redis cache write error in listOpenMatches:", err.message);
+    }
+  }
+  return formattedMatches;
 }
 
 export async function handlePlayerLeave(matchId, userId) {
+  const parsedMatchId = parseInt(matchId, 10);
+  const parsedUserId = parseInt(userId, 10);
+
+  if (isNaN(parsedMatchId) || isNaN(parsedUserId)) return;
   const match = await prisma.match.findUnique({
-    where: { id: matchId },
+    where: { id: parsedMatchId },
     include: { participants: true },
   });
-  
+
   if (!match) return;
 
-  if (match.status === "WAITING") {
-    // 1. If game hasn't started, remove them from the room
-    await prisma.matchParticipant.deleteMany({ 
-      where: { matchId, userId } 
-    });
-    
-    // If room is now empty, close it completely
-    const remainingPlayers = match.participants.filter(p => p.userId !== userId);
-    if (remainingPlayers.length === 0) {
-      await prisma.match.update({ 
-        where: { id: matchId }, 
-        data: { status: "CLOSED" } 
-      });
-    }
-  } else if (match.status === "RUNNING") {
-    // 2. If game is running and they leave, the opponent automatically wins
-    const opponent = match.participants.find(p => p.userId !== userId);
+  if (match.status === "WAITING" || match.status === "RUNNING") {
+    const opponent = match.participants.find((p) => p.userId !== parsedUserId);
+
     if (opponent) {
-      await finishMatch(matchId, opponent.userId);
+      // Opponent exists: Declare them the winner!
+      const finishedMatch = await finishMatch(parsedMatchId, opponent.userId);
+
+      // Emit the victory to the remaining player's socket
+      import("../sockets/io.js").then(({ getIo }) => {
+        const io = getIo();
+        if (io) {
+          io.to(`duel:${parsedMatchId}`).emit("duel:finished", {
+            matchId: parsedMatchId,
+            winnerId: opponent.userId,
+            match: finishedMatch,
+          });
+        }
+      });
+    } else {
+      // No opponent ever joined: Permanently close the room.
+      await prisma.match.update({
+        where: { id: parsedMatchId },
+        data: { status: "CLOSED" },
+      });
     }
   }
 }
 
 export async function joinMatch(matchId, userId) {
-  const match = await prisma.match.findUnique({
-    where: { id: matchId },
-    include: { participants: true, config: true },
-  });
-
-  if (!match) throw new AppError("Match not found", 404);
-  if (match.status !== "WAITING") throw new AppError("Match is not open", 400);
-  if (match.participants.length >= 2) throw new AppError("Room is full", 400);
-  if (match.participants.some((p) => p.userId === userId)) {
-    throw new AppError("Already in this match", 400);
+  const redis = getRedis();
+  const lockKey = `lock:match:${matchId}`;
+  if (redis) {
+    // Attempt to acquire lock for 3 seconds
+    const acquired = await redis.set(lockKey, userId, "NX", "PX", 3000);
+    if (!acquired)
+      throw new AppError(
+        "Match is currently being joined by another player. Try again.",
+        409,
+      );
   }
+  try {
+    const match = await prisma.match.findUnique({
+      where: { id: matchId },
+      include: { participants: true, config: true },
+    });
+    if (match.participants.length >= 2) throw new AppError("Room is full", 400);
+    if (!match) throw new AppError("Match not found", 404);
+    if (match.participants.some((p) => p.userId === userId)) {
+      return getMatch(matchId);
+    }
+    if (match.status !== "WAITING")
+      throw new AppError("Match is not open", 400);
+    if (match.participants.length >= 2) throw new AppError("Room is full", 400);
+    if (match.participants.some((p) => p.userId === userId)) {
+      throw new AppError("Already in this match", 400);
+    }
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  await prisma.matchParticipant.create({
-    data: { matchId, userId, ratingBefore: user.rating },
-  });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    await prisma.matchParticipant.create({
+      data: { matchId, userId, ratingBefore: user.rating },
+    });
+    const currentMatch = await prisma.match.findUnique({
+      where: { id: matchId },
+      include: { participants: true },
+    });
 
-  const updated = await getMatch(matchId);
-  emitMatchUpdate(matchId, updated);
-  return updated;
+    let autoStarted = false;
+    if (currentMatch.participants.length >= 2) {
+      await prisma.match.update({
+        where: { id: matchId },
+        data: { status: "RUNNING", startedAt: new Date() },
+      });
+      autoStarted = true;
+    }
+    const updated = await getMatch(matchId);
+    emitMatchUpdate(matchId, updated);
+    if (autoStarted) {
+      getIo()
+        ?.to(`duel:${matchId}`)
+        .emit("duel:started", { matchId, match: updated });
+    }
+    return updated;
+  } finally {
+    if (redis) await redis.del(lockKey);
+  }
 }
 
 export async function getMatch(matchId) {
@@ -158,7 +255,11 @@ export async function getMatch(matchId) {
     where: { id: parseInt(matchId, 10) || 0 },
     include: {
       config: { include: { problem: true } },
-      participants: { include: { user: { select: { id: true, username: true, rating: true } } } },
+      participants: {
+        include: {
+          user: { select: { id: true, username: true, rating: true } },
+        },
+      },
       chatMessages: {
         include: { sender: { select: { username: true } } },
         orderBy: { createdAt: "asc" },
@@ -231,7 +332,9 @@ export async function lockAndStartMatch(matchId) {
   clearReady(matchId);
   const updated = await getMatch(matchId);
   emitMatchUpdate(matchId, updated);
-  getIo()?.to(`duel:${matchId}`).emit("duel:started", { matchId, match: updated });
+  getIo()
+    ?.to(`duel:${matchId}`)
+    .emit("duel:started", { matchId, match: updated });
   return updated;
 }
 
@@ -241,25 +344,35 @@ export async function finishMatch(matchId, winnerId) {
     include: { participants: { include: { user: true } } },
   });
   if (!match) throw new AppError("Match not found", 404);
-
+  // 1. ATOMIC LOCK: Try to update the match ONLY if it is still RUNNING
+  const atomicUpdate = await prisma.match.updateMany({
+    where: {
+      id: matchId,
+      status: "RUNNING", // The crucial lock condition
+    },
+    data: { status: "FINISHED", endedAt: new Date(), winnerId },
+  });
+  if (atomicUpdate.count === 0) {
+    console.log(
+      `Race condition mitigated for match ${matchId}. Winner was already decided.`,
+    );
+    return getMatch(matchId); // Return the match data with the TRUE winner
+  }
   const updates = calculateElo(match.participants, winnerId);
 
   await prisma.$transaction([
-    prisma.match.update({
-      where: { id: matchId },
-      data: { status: "FINISHED", endedAt: new Date(), winnerId },
-    }),
+    // We already updated the Match table above, so we only update Participants and Users here
     ...updates.map((u) =>
       prisma.matchParticipant.update({
         where: { id: u.participantId },
         data: { ratingAfter: u.ratingAfter, score: u.score },
-      })
+      }),
     ),
     ...updates.map((u) =>
       prisma.user.update({
         where: { id: u.userId },
         data: { rating: u.ratingAfter },
-      })
+      }),
     ),
   ]);
 
@@ -270,7 +383,8 @@ export async function finishMatch(matchId, winnerId) {
       email: participant.user.email,
       won: u.userId === winnerId,
       ratingChange: u.ratingAfter - u.ratingBefore,
-      opponent: match.participants.find((p) => p.userId !== u.userId)?.user.username,
+      opponent: match.participants.find((p) => p.userId !== u.userId)?.user
+        .username,
     });
   }
 
@@ -290,8 +404,20 @@ function calculateElo(participants, winnerId) {
   const newB = Math.round(ratingB + k * (scoreB - expectedB));
 
   return [
-    { participantId: a.id, userId: a.userId, ratingBefore: ratingA, ratingAfter: newA, score: scoreA },
-    { participantId: b.id, userId: b.userId, ratingBefore: ratingB, ratingAfter: newB, score: scoreB },
+    {
+      participantId: a.id,
+      userId: a.userId,
+      ratingBefore: ratingA,
+      ratingAfter: newA,
+      score: scoreA,
+    },
+    {
+      participantId: b.id,
+      userId: b.userId,
+      ratingBefore: ratingB,
+      ratingAfter: newB,
+      score: scoreB,
+    },
   ];
 }
 
@@ -327,7 +453,8 @@ function formatMatchDetail(match) {
                 difficulty: problem.difficulty,
                 inputFormat: problem.inputFormat,
                 outputFormat: problem.outputFormat,
-                constraints: problem.constraints?.split("\n").filter(Boolean) || [],
+                constraints:
+                  problem.constraints?.split("\n").filter(Boolean) || [],
                 timeLimit: problem.timeLimit,
                 memoryLimit: problem.memoryLimit,
               }
@@ -351,4 +478,12 @@ function formatMatchDetail(match) {
     endedAt: match.endedAt,
     winnerId: match.winnerId,
   };
+}
+export async function cancelMatchmaking(userId) {
+  const redis = getRedis();
+  if (redis) {
+    // Remove the user from the Redis queue
+    await redis.lrem("duel:matchmaking_queue", 0, String(userId));
+  }
+  return { success: true };
 }
