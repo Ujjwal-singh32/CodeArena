@@ -1,6 +1,24 @@
 version: '3.9'
 
 services:
+  # 1. Database & Caching Services
+  postgres:
+    image: postgres:15-alpine
+    container_name: codearena-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: codearena
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d codearena"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7
     container_name: codearena-redis
@@ -9,7 +27,13 @@ services:
     volumes:
       - redis_data:/data
     command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  # 2. Message Broker Services
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: codearena-zookeeper
@@ -19,7 +43,27 @@ services:
     ports:
       - "2181:2181"
 
- 
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: codearena-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: nc -z localhost 9092 || exit -1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. Application Services
   backend:
     build:
       context: ./server
@@ -29,7 +73,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       kafka:
         condition: service_healthy
     ports:
@@ -49,6 +93,7 @@ services:
     volumes:
       - ./server:/app
       - /app/node_modules
+      # Expose docker socket for the sandbox execution
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - ./server/.env
@@ -68,6 +113,25 @@ services:
       NEXT_PUBLIC_SOCKET_URL: http://localhost:5001
     volumes:
       - ./client:/app
+      - /app/node_modules
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: codearena-admin
+    depends_on:
+      - backend
+    ports:
+      # Mapped to 5002 on host to avoid clashing with the backend at 5001
+      - "5002:5001"
+    environment:
+      ADMIN_PORT: 5001
+      # Connect directly to backend using the internal docker network hostname
+      API_URL: http://backend:5000/api/v1 
+      ADMIN_API_KEY: "your_secret_admin_key"
+    volumes:
+      - ./admin:/app
       - /app/node_modules
 
 volumes:

@@ -11,8 +11,8 @@
 <!-- 8. display game name inside duel room    -->
 
 10. room fix locking 
-11. remove sort as well as easy/medium/ hard section 
-2. topic progess bar increasing on each submission
-9. display streak in dashboard....
+<!-- 11. remove sort as well as easy/medium/ hard section  -->
+<!-- 2. topic progess bar increasing on each submission
+9. display streak in dashboard.... -->
 12. dockerize every thing
 13. apply bloomfilter on username search
