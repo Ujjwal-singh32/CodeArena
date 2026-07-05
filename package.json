@@ -15,6 +15,9 @@
     "concurrently": "^8.0.0"
   },
   "dependencies": {
+    "express-rate-limit": "^8.5.2",
+    "rate-limit-redis": "^5.0.0",
+    "uuid": "^14.0.1",
     "yjs": "^13.6.31"
   }
 }

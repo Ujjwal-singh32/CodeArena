@@ -1,13 +1,18 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1";
 
 async function request(path, options = {}, retried = false) {
+  // 1. Separate the headers from the rest of the options
+  const { headers: customHeaders, ...restOptions } = options;
+
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
+    // 2. Spread the rest of the options (method, body, etc.) FIRST
+    ...restOptions,
+    // 3. Construct the headers object safely
     headers: {
       "Content-Type": "application/json",
-      ...options.headers,
+      ...customHeaders,
     },
-    ...options,
   });
 
   const data = await res.json().catch(() => ({}));
@@ -49,9 +54,20 @@ export const problemsApi = {
   getBySlug: (slug) => request(`/problems/${slug}`),
 };
 
+// INSIDE temp/client/services/api.js
+
 export const submissionsApi = {
-  run: (body) => request("/submissions/run", { method: "POST", body: JSON.stringify(body) }),
-  submit: (body) => request("/submissions", { method: "POST", body: JSON.stringify(body) }),
+  // Update these two methods to accept a headers object
+  run: (body, idempotencyKey = null) => {
+    const headers = idempotencyKey ? { "x-idempotency-key": idempotencyKey } : {};
+    return request("/submissions/run", { method: "POST", headers, body: JSON.stringify(body) });
+  },
+
+  submit: (body, idempotencyKey = null) => {
+    const headers = idempotencyKey ? { "x-idempotency-key": idempotencyKey } : {};
+    return request("/submissions", { method: "POST", headers, body: JSON.stringify(body) });
+  },
+
   listMine: (limit = 50) => request(`/submissions?limit=${limit}`),
   get: (id) => request(`/submissions/${id}`),
 };
