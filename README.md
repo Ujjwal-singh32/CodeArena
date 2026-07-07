@@ -176,14 +176,14 @@ A **dual-token strategy** removes the need for server-side session storage.
 
 | Token | Lifetime | Storage | Purpose |
 |---|:-:|---|---|
-| **Access Token (JWT)** | 15 min | React memory | Non-sensitive payload (`UserId`) |
+| **Access Token (JWT)** | 15 min | `HttpOnly`, `Secure` cookie | Immune to XSS payload (`UserId`) |
 | **Refresh Token** | 7 days | `HttpOnly`, `Secure` cookie | Immune to XSS |
 
-An **Axios Interceptor** catches `401` responses, silently refreshes via `/auth/refresh`, updates memory, and retries the original request — invisibly to the user.
+An **Interceptor** catches `401` responses, silently refreshes via `/auth/refresh`, updates memory, and retries the original request — invisibly to the user.
 
 ```mermaid
 sequenceDiagram
-    participant U as Client (Axios)
+    participant U as Client 
     participant API as Express API
     participant R as Redis/DB
 
@@ -589,6 +589,40 @@ NEXT_PUBLIC_CLIENT_URL="http://localhost:3000"
 > Never commit `.env` to version control. Ship a `.env.example` with placeholders instead, and keep real secrets (`JWT_ACCESS_SECRET`, `ADMIN_API_KEY`, `COHERE_API_KEY`) out of the repo entirely.
 
 ---
+---
+
+## 🖼️ Complete Screenshot Gallery
+
+<table>
+<tr>
+<td width="25%" align="center"><img src="./assests/1v1_duel.png" alt="1v1 Duel"/><br/>1v1_duel</td>
+<td width="25%" align="center"><img src="./assests/1v1_duel_2.png" alt="1v1 Duel 2"/><br/>1v1_duel_2</td>
+<td width="25%" align="center"><img src="./assests/1v1_duel_3.png" alt="1v1 Duel 3"/><br/>1v1_duel_3</td>
+<td width="25%" align="center"><img src="./assests/Dashboard.png" alt="Dashboard"/><br/>Dashboard</td>
+</tr>
+<tr>
+<td width="25%" align="center"><img src="./assests/ER-Diagram.png" alt="ER Diagram"/><br/>ER-Diagram</td>
+<td width="25%" align="center"><img src="./assests/Login.png" alt="Login"/><br/>Login</td>
+<td width="25%" align="center"><img src="./assests/practice.png" alt="Practice"/><br/>practice</td>
+<td width="25%" align="center"><img src="./assests/practice-2.png" alt="Practice 2"/><br/>practice-2</td>
+</tr>
+<tr>
+<td width="25%" align="center"><img src="./assests/problems.png" alt="Problems"/><br/>problems</td>
+<td width="25%" align="center"><img src="./assests/Rooms.png" alt="Rooms"/><br/>Rooms</td>
+<td width="25%" align="center"><img src="./assests/Rooms-2.png" alt="Rooms 2"/><br/>Rooms-2</td>
+<td width="25%" align="center"><img src="./assests/Rooms-3.png" alt="Rooms 3"/><br/>Rooms-3</td>
+</tr>
+<tr>
+<td width="25%" align="center"><img src="./assests/Signup.png" alt="Signup"/><br/>Signup</td>
+<td width="25%" align="center"><img src="./assests/Submission.png" alt="Submission"/><br/>Submission</td>
+<td width="25%" align="center"><img src="./assests/submission-2.png" alt="Submission 2"/><br/>submission-2</td>
+<td width="25%" align="center"><img src="./assests/submission-3.png" alt="Submission 3"/><br/>submission-3</td>
+</tr>
+<tr>
+<td width="25%" align="center"><img src="./assests/profile.png" alt="Profile"/><br/>profile</td>
+<td colspan="3"></td>
+</tr>
+</table>
 
 ## 🛠️ Tech Stack Summary
 
